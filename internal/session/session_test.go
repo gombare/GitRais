@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -766,4 +767,25 @@ func TestLinkedWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.waitFor(t, "graph:progress", graphDone(2))
+}
+
+func TestStageLinesFingerprintNonUTF8(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("lat.txt", "a\nb\xe9\nc\n")
+	repo.CommitAll("base")
+	repo.Write("lat.txt", "a\nB\xe9\nc\n")
+	s, _ := open(t, repo)
+	fd, err := s.WipDiff(bg, ops.WipDiffRequest{Path: "lat.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fingerprint reaches the backend through JSON, as over the Wails bridge.
+	raw, _ := json.Marshal(fingerprint(&fd, 0, nil))
+	var fp HunkFingerprint
+	if err := json.Unmarshal(raw, &fp); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StageLines(bg, StageLinesRequest{Path: "lat.txt", Hunk: 0, Expect: &fp}); err != nil {
+		t.Fatalf("whole hunk of a Latin-1 file: %v", err)
+	}
 }

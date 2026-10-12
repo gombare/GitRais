@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"gitrais/internal/diff"
 	"gitrais/internal/gitexec"
@@ -84,11 +85,31 @@ func (fp *HunkFingerprint) matches(h diff.Hunk, lines []int) bool {
 		return false
 	}
 	for k, i := range idx {
-		if fp.Lines[k].Kind != string(h.Lines[i].Kind) || fp.Lines[k].Text != h.Lines[i].Text {
+		if fp.Lines[k].Kind != string(h.Lines[i].Kind) || jsonText(fp.Lines[k].Text) != jsonText(h.Lines[i].Text) {
 			return false
 		}
 	}
 	return true
+}
+
+// jsonText normalises text the way encoding/json does on the way to the
+// frontend: each invalid UTF-8 byte becomes U+FFFD. The fingerprint comes back
+// in that form, so non-UTF-8 files (e.g. Latin-1) must be compared the same way.
+func jsonText(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteRune(utf8.RuneError)
+		} else {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
 }
 
 func (s *Session) Stage(ctx context.Context, paths []string) error {
