@@ -392,6 +392,44 @@ export namespace ops {
 	        this.amend = source["amend"];
 	    }
 	}
+	export class Versions {
+	    old: string;
+	    new: string;
+	    binary: boolean;
+	    tooLarge: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new Versions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.old = source["old"];
+	        this.new = source["new"];
+	        this.binary = source["binary"];
+	        this.tooLarge = source["tooLarge"];
+	    }
+	}
+	export class VersionsRequest {
+	    path: string;
+	    oldPath: string;
+	    staged: boolean;
+	    untracked: boolean;
+	    commit: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new VersionsRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.oldPath = source["oldPath"];
+	        this.staged = source["staged"];
+	        this.untracked = source["untracked"];
+	        this.commit = source["commit"];
+	    }
+	}
 	export class WipDiffRequest {
 	    path: string;
 	    staged: boolean;

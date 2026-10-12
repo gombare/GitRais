@@ -41,6 +41,8 @@ export function Discard(arg1:string,arg2:Array<string>,arg3:Array<string>):Promi
 
 export function Fetch(arg1:string):Promise<void>;
 
+export function FileVersions(arg1:string,arg2:ops.VersionsRequest):Promise<ops.Versions>;
+
 export function FindRow(arg1:string,arg2:string):Promise<number>;
 
 export function GetState():Promise<store.State>;

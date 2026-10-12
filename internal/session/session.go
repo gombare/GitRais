@@ -394,6 +394,17 @@ func (s *Session) WipDiff(ctx context.Context, req ops.WipDiffRequest) (diff.Fil
 	return ops.WipDiff(ctx, s.r, s.Dir, req)
 }
 
+// FileVersions returns the old and new contents of a file for the diff
+// viewer (see ops.FileVersions). Commit, when set, must be a full hash.
+func (s *Session) FileVersions(ctx context.Context, req ops.VersionsRequest) (ops.Versions, error) {
+	if req.Commit != "" {
+		if err := validHash(req.Commit); err != nil {
+			return ops.Versions{}, err
+		}
+	}
+	return ops.FileVersions(ctx, s.r, s.Dir, req)
+}
+
 // CommitFileDiff returns the diff of one file in a commit against its first
 // parent (the empty tree for a root commit). oldPath is the pre-rename path.
 func (s *Session) CommitFileDiff(ctx context.Context, hash, path, oldPath string) (diff.FileDiff, error) {

@@ -36,6 +36,7 @@ var sentinelKinds = []struct {
 	{errNoTab, "NoTab"},
 	{errGitMissing, "GitMissing"},
 	{errInvalidPath, "InvalidPath"},
+	{ops.ErrInvalidFilePath, "InvalidFilePath"},
 	{ops.ErrEmptyMessage, "EmptyMessage"},
 	{ops.ErrNothingToCommit, "NothingToCommit"},
 	{ops.ErrNothingToAmend, "NothingToAmend"},

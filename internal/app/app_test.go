@@ -232,6 +232,10 @@ func TestUIErrorJSON(t *testing.T) {
 	if ue := decodeUIError(t, err); ue.Kind != "InvalidHash" {
 		t.Fatalf("err = %v", err)
 	}
+	_, err = a.FileVersions(tab.ID, ops.VersionsRequest{Path: "../x", Untracked: true})
+	if ue := decodeUIError(t, err); ue.Kind != "InvalidFilePath" {
+		t.Fatalf("err = %v", err)
+	}
 }
 
 func TestUIErrorKinds(t *testing.T) {
@@ -247,6 +251,7 @@ func TestUIErrorKinds(t *testing.T) {
 		{ops.ErrStashNotFound, "StashNotFound"},
 		{fmt.Errorf("pull: %w", ops.ErrPullStrategyRequired), "PullStrategyRequired"},
 		{ops.ErrDestNotEmpty, "DestNotEmpty"},
+		{fmt.Errorf("%w: x", ops.ErrInvalidFilePath), "InvalidFilePath"},
 		{session.ErrClosed, "Cancelled"},
 		{context.Canceled, "Cancelled"},
 		{context.DeadlineExceeded, "Timeout"},

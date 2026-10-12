@@ -291,6 +291,10 @@ func (a *App) WipDiff(tab string, req ops.WipDiffRequest) (diff.FileDiff, error)
 	return with(a, tab, func(s *session.Session) (diff.FileDiff, error) { return s.WipDiff(a.ctx, req) })
 }
 
+func (a *App) FileVersions(tab string, req ops.VersionsRequest) (ops.Versions, error) {
+	return with(a, tab, func(s *session.Session) (ops.Versions, error) { return s.FileVersions(a.ctx, req) })
+}
+
 func (a *App) CommitFileDiff(tab, hash, path, oldPath string) (diff.FileDiff, error) {
 	return with(a, tab, func(s *session.Session) (diff.FileDiff, error) {
 		return s.CommitFileDiff(a.ctx, hash, path, oldPath)

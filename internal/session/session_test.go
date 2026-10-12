@@ -295,6 +295,12 @@ func TestReadsCommitAndDiffs(t *testing.T) {
 	if _, err := s.CommitFileDiff(bg, "--output=x", "f.txt", ""); err == nil {
 		t.Fatal("option-like hash accepted")
 	}
+	if v, err := s.FileVersions(bg, ops.VersionsRequest{Path: "f.txt", Commit: second}); err != nil || v.Old != "a\n" || v.New != "a\nb\n" {
+		t.Fatalf("FileVersions = %+v, %v", v, err)
+	}
+	if _, err := s.FileVersions(bg, ops.VersionsRequest{Path: "f.txt", Commit: "HEAD"}); !errors.Is(err, ErrInvalidHash) {
+		t.Fatalf("FileVersions(HEAD) err = %v", err)
+	}
 	if msg, err := s.LastCommitMessage(bg); err != nil || msg != "second\n\nbody" {
 		t.Fatalf("LastCommitMessage = %q, %v", msg, err)
 	}

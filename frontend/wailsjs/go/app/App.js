@@ -66,6 +66,10 @@ export function Fetch(arg1) {
   return window['go']['app']['App']['Fetch'](arg1);
 }
 
+export function FileVersions(arg1, arg2) {
+  return window['go']['app']['App']['FileVersions'](arg1, arg2);
+}
+
 export function FindRow(arg1, arg2) {
   return window['go']['app']['App']['FindRow'](arg1, arg2);
 }
