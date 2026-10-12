@@ -20,8 +20,9 @@ type Layout struct {
 }
 
 func (l *Layout) alloc(hash string) int {
+	// I colori stanno in uint16 nei Seg: il contatore riparte da 0 così nodo e segmenti coincidono.
 	color := l.next
-	l.next++
+	l.next = (l.next + 1) & 0xFFFF
 	for i, h := range l.lanes {
 		if h == "" {
 			l.lanes[i], l.colors[i] = hash, color
