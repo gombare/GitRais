@@ -90,3 +90,33 @@ button:disabled { opacity: .5; cursor: default; }
 .lp-head { padding: 0; }
 .lp-toggle { display: block; width: 100%; text-align: left; padding: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; }
 .lp-toggle:focus-visible { outline: 2px solid var(--accent); }
+
+/* Right panel: commit details and WIP */
+.detail { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 100%; box-sizing: border-box; }
+.detail-summary { margin: 0; font-size: 14px; }
+.detail-body { white-space: pre-wrap; font: 12px var(--mono); margin: 0; color: var(--fg-muted); }
+.detail-meta { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; margin: 0; }
+.detail-meta dt { color: var(--fg-muted); }
+.detail-meta dd { margin: 0; overflow: hidden; text-overflow: ellipsis; }
+.mono { font-family: var(--mono); }
+.file-list { list-style: none; margin: 0; padding: 0; }
+.file-list li { display: flex; gap: 4px; align-items: center; padding: 0 6px 0 0; border-radius: 4px; cursor: default; }
+.file-list li:hover, .file-list li.selected { background: var(--bg-3); }
+.file-row { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: center; background: none; border: none; padding: 3px 6px; text-align: left; border-radius: 4px; color: inherit; }
+.file-row:focus-visible, .file-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.file-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.st { min-width: 16px; text-align: center; font: 11px var(--mono); border-radius: 3px; }
+.st-A { color: var(--ok); } .st-M { color: #f5a524; } .st-D { color: var(--danger); } .st-R { color: var(--accent); } .st-U { color: #e05ee0; }
+.file-btn { opacity: 0; padding: 1px 6px; font-size: 11px; }
+.file-list li:hover .file-btn, .file-list li:focus-within .file-btn { opacity: 1; }
+.wip-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.wip-head h4 { margin: 4px 0; }
+.wip-actions { display: flex; gap: 4px; }
+.wip-section { flex: 1; min-height: 80px; overflow: auto; }
+.commit-form { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; position: relative; }
+.commit-form input[aria-label="Oggetto del commit"] { padding-right: 52px; }
+.counter { position: absolute; right: 8px; top: 14px; font-size: 11px; }
+.counter.warn { color: #f5a524; }
+.amend { display: flex; gap: 6px; align-items: center; }
+.hook-error { border: 1px solid var(--danger); border-radius: 4px; padding: 6px 8px; }
+.hook-error pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--fg-muted); margin: 4px 0 0; max-height: 160px; overflow: auto; }

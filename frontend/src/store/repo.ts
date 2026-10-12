@@ -40,6 +40,9 @@ type RepoStore = {
   jump(tab: string, hash: string): Promise<void>;
 };
 
+// Latest status request per tab: out-of-order responses (event storms) are dropped.
+const statusSeq = new Map<string, number>();
+
 export const useRepo = create<RepoStore>((set, get) => ({
   repos: {},
   get(tab) {
@@ -66,8 +69,11 @@ export const useRepo = create<RepoStore>((set, get) => ({
     }
   },
   async refreshStatus(tab) {
+    const seq = (statusSeq.get(tab) ?? 0) + 1;
+    statusSeq.set(tab, seq);
     try {
-      get().patch(tab, { status: await api.Status(tab) });
+      const status = await api.Status(tab);
+      if (statusSeq.get(tab) === seq) get().patch(tab, { status });
     } catch (e) {
       useApp.getState().toast(e, tab);
     }
