@@ -19,6 +19,8 @@ export function useKeybindings(handlers: Partial<Record<Command, () => void>>) {
         && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
       if (typing && !e.metaKey) return;
       const cmd = commandFor(e);
+      // Stage/unstage all must not hijack Cmd+Shift+S/U typed into a text field.
+      if (typing && (cmd === 'repo:stageAll' || cmd === 'repo:unstageAll')) return;
       const h = cmd && ref.current[cmd];
       if (h) {
         e.preventDefault();

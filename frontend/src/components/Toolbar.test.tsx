@@ -110,4 +110,24 @@ describe('Toolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
     await waitFor(() => expect(api.StashPush).toHaveBeenCalledWith('t', '', true));
   });
+  it('Stash and Branch ignore a second activation while one is running', async () => {
+    let done!: () => void;
+    api.StashPush.mockImplementation(() => new Promise<undefined>((r) => { done = () => r(undefined); }));
+    mount();
+    const b = screen.getByRole('button', { name: 'Stash' });
+    fireEvent.click(b);
+    fireEvent.click(b);
+    expect(api.StashPush).toHaveBeenCalledTimes(1);
+    await act(async () => { done(); });
+    fireEvent.click(b);
+    expect(api.StashPush).toHaveBeenCalledTimes(2);
+    await act(async () => { done(); });
+  });
+  it('Branch dialog cannot be opened twice', async () => {
+    mount();
+    const b = screen.getByRole('button', { name: 'Branch' });
+    fireEvent.click(b);
+    fireEvent.click(b);
+    expect(await screen.findAllByRole('dialog')).toHaveLength(1);
+  });
 });

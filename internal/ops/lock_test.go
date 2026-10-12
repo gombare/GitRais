@@ -123,3 +123,29 @@ func TestRemoveIndexLockOnlyInsideGitDir(t *testing.T) {
 		t.Fatal("symlink target touched")
 	}
 }
+
+func TestRemoveIndexLockLsofTimeoutFailsClosed(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	gitDir := filepath.Join(repo.Dir, ".git")
+	lock := filepath.Join(gitDir, "index.lock")
+	os.WriteFile(lock, nil, 0o644)
+	ageLock(t, lock)
+	fake := filepath.Join(t.TempDir(), "lsof")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldPath, oldTO := lsofPath, lsofTimeout
+	lsofPath, lsofTimeout = fake, 200*time.Millisecond
+	t.Cleanup(func() { lsofPath, lsofTimeout = oldPath, oldTO })
+	start := time.Now()
+	err := RemoveIndexLock(bg, gitDir)
+	if err == nil {
+		t.Fatal("a hung lsof must make the removal fail")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("lsof was not bounded: %v", time.Since(start))
+	}
+	if _, err := os.Stat(lock); err != nil {
+		t.Fatal("lock must be kept when lsof times out")
+	}
+}

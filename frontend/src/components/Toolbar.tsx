@@ -10,6 +10,11 @@ const PULL_MODES = [
   { value: 'ff-only', label: 'Solo fast-forward' },
 ];
 
+// Actions that are currently running, keyed by tab and name: a double click
+// must not start them twice. Module-level because the toolbar and the
+// keyboard shortcuts use separate useRepoActions instances.
+const inFlight = new Set<string>();
+
 // Actions shared by the toolbar buttons and the keyboard shortcuts. Remote
 // operations go through runOp so their op:progress events reach the toolbar.
 export function useRepoActions(tab: string) {
@@ -20,6 +25,16 @@ export function useRepoActions(tab: string) {
       await useApp.getState().runOp(tab, op, fn);
     } catch (e) {
       toast(e, tab);
+    }
+  };
+  const once = async (name: string, fn: () => Promise<unknown> | void) => {
+    const key = `${tab}:${name}`;
+    if (inFlight.has(key)) return;
+    inFlight.add(key);
+    try {
+      await fn();
+    } finally {
+      inFlight.delete(key);
     }
   };
   const pull = async (mode = ''): Promise<void> => {
@@ -51,11 +66,11 @@ export function useRepoActions(tab: string) {
       });
       if (ok && !busy()) await remote('push', () => api.Push(tab, true));
     },
-    branch: async () => {
+    branch: () => once('branch', async () => {
       const n = await askText({ title: 'Nuovo branch da HEAD', label: 'Nome' });
       if (n) await api.CreateBranch(tab, n, 'HEAD', true).catch((e) => toast(e, tab));
-    },
-    stash: () => api.StashPush(tab, '', true).catch((e) => toast(e, tab)),
+    }),
+    stash: () => once('stash', () => api.StashPush(tab, '', true).catch((e) => toast(e, tab))),
     pop: () => {
       // The newest stash comes first; the backend identifies stashes by commit hash.
       const top = useRepo.getState().repos[tab]?.stashes[0];

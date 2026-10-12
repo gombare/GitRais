@@ -13,6 +13,7 @@ export function AuthDialog() {
 
 function PromptForm({ p }: { p: AuthPrompt }) {
   const cancelAuth = useApp((s) => s.cancelAuth);
+  const toast = useApp((s) => s.toast);
   const [value, setValue] = useState('');
   const root = useRef<HTMLFormElement>(null);
   const answered = useRef(false);
@@ -28,7 +29,8 @@ function PromptForm({ p }: { p: AuthPrompt }) {
     if (answered.current) return;
     answered.current = true;
     // The answer is never logged or stored: it only goes to the backend and the state is dropped.
-    api.AnswerAuth(p.id, ok ? value : '', ok);
+    // A rejection gets a generic toast: the error text could echo the credential.
+    api.AnswerAuth(p.id, ok ? value : '', ok).catch(() => toast(new Error('Impossibile inviare la risposta di autenticazione.'), undefined));
     setValue('');
     cancelAuth(p.id);
   };

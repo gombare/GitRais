@@ -26,6 +26,10 @@ var (
 // minLockAge is how old a lock must be before it may be removed.
 const minLockAge = 5 * time.Second
 
+// lsofTimeout bounds the lsof call; on expiry the lock is left in place.
+// A variable so tests can shorten it.
+var lsofTimeout = 10 * time.Second
+
 // lsofPath is a variable so tests can simulate a missing lsof.
 var lsofPath = "/usr/sbin/lsof"
 
@@ -54,10 +58,17 @@ func RemoveIndexLock(ctx context.Context, gitDir string) error {
 	if _, err := os.Stat(lsofPath); err != nil {
 		return ErrLsofMissing
 	}
+	// lsof can hang on a stuck network mount: bound it and fail closed.
+	ctx, cancel := context.WithTimeout(ctx, lsofTimeout)
+	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, lsofPath, "-t", "--", p)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if err != nil && ctx.Err() != nil {
+		// Timed out or cancelled: a killed lsof looks like "no holder", so check first.
+		return ctx.Err()
+	}
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
@@ -73,6 +84,9 @@ func RemoveIndexLock(ctx context.Context, gitDir string) error {
 	if len(bytes.TrimSpace(out)) > 0 {
 		return ErrLockInUse
 	}
+	// Residual race: a git process may create or open the lock between the
+	// lsof check and the removal. It cannot be closed without kernel support;
+	// the age check and the user's confirmation keep the window small.
 	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}

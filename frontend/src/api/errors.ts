@@ -8,6 +8,8 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   Conflict: ['Conflitti', "L'operazione ha prodotto conflitti da risolvere.", null],
   DirtyWorktree: ['Modifiche locali', 'Le modifiche locali verrebbero sovrascritte: fai commit o stash.', null],
   Locked: ['Repository bloccato', 'Un altro processo git sta usando il repository (index.lock).', 'removeLock'],
+  // Informational: shown after a successful lock removal.
+  LockRemoved: ['Lock rimosso: riprova l’operazione', 'index.lock è stato rimosso.', null],
   LockInUse: ['Lock in uso', 'Un processo sta ancora usando index.lock: attendi la fine dell’operazione.', null],
   LockTooRecent: ['Lock appena creato', 'index.lock è stato creato pochi secondi fa: un’operazione git potrebbe essere in corso. Riprova tra poco.', null],
   LsofMissing: ['Verifica non possibile', 'lsof non è disponibile: non posso verificare che index.lock non sia in uso, quindi non lo rimuovo.', null],

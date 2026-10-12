@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const api = vi.hoisted(() => ({ RemoveIndexLock: vi.fn(async (..._a: unknown[]) => undefined) }));
+const api = vi.hoisted(() => ({ Pull: vi.fn(async (..._a: unknown[]) => undefined), RemoveIndexLock: vi.fn(async (..._a: unknown[]) => undefined) }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
 import { useApp } from '../store/app';
@@ -10,6 +10,7 @@ import { Toasts } from './Toasts';
 import { DialogHost } from './Dialogs';
 
 beforeEach(() => {
+  api.Pull.mockReset().mockResolvedValue(undefined);
   api.RemoveIndexLock.mockReset().mockResolvedValue(undefined);
   useApp.setState({ tabs: [{ id: 't', path: '/r', name: 'r' }], toasts: [], ops: {} });
   act(() => useApp.getState().toast(JSON.stringify({ kind: 'Locked', message: 'm', stderr: '' }), 't'));
@@ -39,5 +40,23 @@ describe('Toasts removeLock', () => {
     const dlg = await screen.findByRole('dialog');
     await act(async () => { fireEvent.click(dlg.querySelector('button.danger')!); });
     await screen.findByText('Lock in uso');
+  });
+  it('a successful removal tells the user to retry', async () => {
+    render(<><Toasts /><DialogHost /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'Rimuovi lock' }));
+    const dlg = await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(dlg.querySelector('button.danger')!); });
+    await screen.findByText(/Lock rimosso: riprova l.operazione/);
+  });
+  it('the Pull action ignores a double activation', async () => {
+    useApp.setState({ toasts: [] });
+    act(() => useApp.getState().toast(JSON.stringify({ kind: 'NonFastForward', message: 'm', stderr: '' }), 't'));
+    api.Pull.mockImplementation(() => new Promise<undefined>(() => {}));
+    render(<Toasts />);
+    const b = screen.getByRole('button', { name: 'Pull' });
+    fireEvent.click(b);
+    fireEvent.click(b);
+    await waitFor(() => expect(api.Pull).toHaveBeenCalled());
+    expect(api.Pull).toHaveBeenCalledTimes(1);
   });
 });

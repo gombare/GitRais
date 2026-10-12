@@ -62,7 +62,13 @@ export function RepoView({ tab }: { tab: string }) {
     'commit:commit': clickCommit,
     'commit:commitAll': async () => {
       useRepo.getState().select(tab, { kind: 'wip' });
-      await run(api.StageAll(tab));
+      // Never commit on top of a failed stage: abort and let the toast explain.
+      try {
+        await api.StageAll(tab);
+      } catch (e) {
+        toast(e, tab);
+        return;
+      }
       // The commit button enables itself from the refreshed status: wait for it.
       await useRepo.getState().refreshStatus(tab);
       await new Promise((r) => setTimeout(r, 0));
@@ -85,8 +91,11 @@ export function RepoView({ tab }: { tab: string }) {
   } : {});
 
   const persist = () => { void run(api.SaveLayout(latest.current as store.Layout)); };
-  const resizeLeft = (dx: number) => setLayout((l) => ({ ...l, leftWidth: clamp(l.leftWidth + dx, LEFT) }));
-  const resizeRight = (dx: number) => setLayout((l) => ({ ...l, rightWidth: clamp(l.rightWidth + dx, RIGHT) }));
+  // The ref is updated synchronously here, so the onDone() that follows a key
+  // press persists the new width rather than the one from the last render.
+  const update = (next: typeof layout) => { latest.current = next; setLayout(next); };
+  const resizeLeft = (dx: number) => update({ ...latest.current, leftWidth: clamp(latest.current.leftWidth + dx, LEFT) });
+  const resizeRight = (dx: number) => update({ ...latest.current, rightWidth: clamp(latest.current.rightWidth + dx, RIGHT) });
   return (
     <div className="repo" ref={root}>
       <Toolbar tab={tab} />

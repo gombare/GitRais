@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { api } from '../api/client';
 import { describeError } from '../api/errors';
 import { useApp } from '../store/app';
@@ -8,9 +9,17 @@ export function Toasts() {
   const dismiss = useApp((s) => s.dismiss);
   const toast = useApp((s) => s.toast);
   const runOp = useApp((s) => s.runOp);
+  // Actions already running, so a double click cannot start them twice.
+  const running = useRef(new Set<string>());
   const act = async (id: number, action: string, tab?: string) => {
+    const key = `${tab}:${action}`;
+    if (running.current.has(key)) return;
+    running.current.add(key);
     dismiss(id);
-    if (!tab) return;
+    if (!tab) {
+      running.current.delete(key);
+      return;
+    }
     try {
       if (action === 'pull') await runOp(tab, 'pull', () => api.Pull(tab, ''));
       if (action === 'removeLock') {
@@ -20,10 +29,15 @@ export function Toasts() {
           message: 'Verifica che nessun altro programma stia usando git su questo repository. Il file viene rimosso solo se nessun processo lo tiene aperto.',
           danger: true,
         });
-        if (ok) await api.RemoveIndexLock(tab);
+        if (ok) {
+          await api.RemoveIndexLock(tab);
+          toast(JSON.stringify({ kind: 'LockRemoved', message: 'Lock rimosso', stderr: '' }), tab);
+        }
       }
     } catch (e) {
       toast(e, tab);
+    } finally {
+      running.current.delete(key);
     }
   };
   return (

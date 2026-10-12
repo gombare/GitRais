@@ -68,4 +68,18 @@ describe('useKeybindings', () => {
     document.body.dispatchEvent(ev);
     expect(ev.defaultPrevented).toBe(false);
   });
+  it('Cmd+Shift+S / Cmd+Shift+U do not fire inside a text field; other Cmd combos still do', () => {
+    const s = vi.fn();
+    const u = vi.fn();
+    const fetch = vi.fn();
+    const { getByLabelText } = render(<Host handlers={{ 'repo:stageAll': s, 'repo:unstageAll': u, 'repo:fetch': fetch }} />);
+    fireEvent.keyDown(getByLabelText('field'), { key: 's', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(getByLabelText('area'), { key: 'u', metaKey: true, shiftKey: true });
+    expect(s).not.toHaveBeenCalled();
+    expect(u).not.toHaveBeenCalled();
+    fireEvent.keyDown(getByLabelText('field'), { key: 'f', metaKey: true, shiftKey: true });
+    expect(fetch).toHaveBeenCalledOnce();
+    fireEvent.keyDown(document.body, { key: 's', metaKey: true, shiftKey: true });
+    expect(s).toHaveBeenCalledOnce();
+  });
 });

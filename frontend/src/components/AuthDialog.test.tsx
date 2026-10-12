@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const api = vi.hoisted(() => ({ AnswerAuth: vi.fn(async (..._a: unknown[]) => undefined) }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
@@ -97,5 +97,15 @@ describe('AuthDialog', () => {
     push({ id: 'a', prompt: 'Password: ', secret: true });
     fireEvent.click(screen.getByRole('button', { name: 'Annulla' }));
     expect(document.activeElement).toBe(screen.getByText('opener'));
+  });
+  it('a rejected AnswerAuth becomes a generic toast that never contains the value', async () => {
+    api.AnswerAuth.mockRejectedValueOnce(new Error('failed for s3cret'));
+    useApp.setState({ toasts: [] });
+    render(<AuthDialog />);
+    push({ id: 'a', prompt: 'Password: ', secret: true });
+    fireEvent.change(screen.getByLabelText(/Password/), { target: { value: 's3cret' } });
+    fireEvent.submit(screen.getByRole('dialog'));
+    await waitFor(() => expect(useApp.getState().toasts).toHaveLength(1));
+    expect(JSON.stringify(useApp.getState().toasts)).not.toContain('s3cret');
   });
 });
