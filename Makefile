@@ -1,7 +1,7 @@
 GIT_VERSION := 2.54.0
 export GITRAIS_GIT ?= $(CURDIR)/build/git-dist/bin/git
 
-.PHONY: git helper dist-stub test test-short dev build package bench bigrepo
+.PHONY: git helper dist-stub test test-short e2e dev build package bench bigrepo
 
 git:
 	./scripts/build-git.sh $(GIT_VERSION) build/git-dist
@@ -19,6 +19,9 @@ test: helper dist-stub
 
 test-short: dist-stub
 	go test -short ./...
+
+e2e:
+	./scripts/e2e.sh
 
 dev: helper
 	wails dev

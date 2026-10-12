@@ -5,3 +5,4 @@ node_modules/
 frontend/dist/
 frontend/test-results/
 build/bigrepo/
+frontend/playwright-report/
