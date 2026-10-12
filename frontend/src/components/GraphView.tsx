@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { api } from '../api/client';
 import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
 import { RowCache } from '../graph/rowCache';
+import { useDevicePixelRatio } from '../hooks/useDevicePixelRatio';
 import { drawGraph } from '../graph/draw';
 import { graphWidth, GRAPH_PAD, LANE_W, ROW_H, visibleRange } from '../graph/geometry';
 import type { app, gitread } from '../../wailsjs/go/models';
@@ -40,6 +41,9 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
   const [viewport, setViewport] = useState(600);
   const [tick, force] = useState(0);
   const [width, setWidth] = useState(80);
+  const dpr = useDevicePixelRatio();
+  const listId = useId();
+  const warned = useRef<RowCache<app.RowDTO> | null>(null); // cache that already showed its error toast
 
   // A new cache per (tab, graph version): graph:reset invalidates every row and any in-flight page.
   const cache = useMemo(() => {
@@ -66,8 +70,8 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
     const vr = visibleRange(scrollTopRef.current, viewport, total, 2);
     const rows: Array<app.RowDTO | undefined> = [];
     for (let i = vr.start; i < vr.end; i++) rows.push(cache.get(i));
-    drawGraph(ctx, rows, vr.start, scrollTopRef.current, width, viewport, selected);
-  }, [cache, viewport, total, width, selected]);
+    drawGraph(ctx, rows, vr.start, scrollTopRef.current, width, viewport, selected, dpr);
+  }, [cache, viewport, total, width, selected, dpr]);
   const drawRef = useRef(draw);
   drawRef.current = draw;
   const schedule = useCallback(() => {
@@ -77,12 +81,20 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
       drawRef.current();
     });
   }, []);
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  useEffect(() => () => {
+    cancelAnimationFrame(raf.current);
+    raf.current = 0; // StrictMode re-runs effects: a stale non-zero id would block scheduling forever
+  }, []);
 
   const rows = useMemo(() => {
     void tick; // recompute when the cache loaded new pages
     return Array.from({ length: end - start }, (_, k) => cache.get(start + k));
   }, [cache, start, end, tick]);
+
+  const activeIdx = useMemo(() => {
+    const k = selected ? rows.findIndex((r) => r?.hash === selected) : -1;
+    return k >= 0 ? start + k : -1;
+  }, [rows, selected, start]);
 
   // The graph may still be growing: its incomplete tail page must be refetched.
   useEffect(() => {
@@ -93,10 +105,15 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
     let live = true;
     cache.ensure(start, end).then(
       (loaded) => {
+        if (warned.current === cache) warned.current = null; // fetching works again
         if (live && loaded) force((x) => x + 1);
       },
       (e) => {
-        if (live) useApp.getState().toast(e, tab);
+        // One toast per cache instance until a fetch succeeds: a persistent failure must not spam.
+        if (live && warned.current !== cache) {
+          warned.current = cache;
+          useApp.getState().toast(e, tab);
+        }
       },
     );
     return () => {
@@ -104,9 +121,11 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
     };
   }, [cache, start, end, total, done, tab]);
 
+  // The width only grows while the same cache is active (no jitter as rows scroll in and out).
+  useEffect(() => setWidth(80), [cache]);
   useEffect(() => {
     const w = Math.min(MAX_GRAPH_W, Math.max(80, graphWidth(rows)));
-    setWidth((prev) => (prev === w ? prev : w));
+    setWidth((prev) => Math.max(prev, w));
   }, [rows]);
 
   useEffect(() => {
@@ -122,11 +141,10 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
     c.width = Math.round(width * dpr);
     c.height = Math.round(viewport * dpr);
     schedule();
-  }, [width, viewport, schedule]);
+  }, [width, viewport, dpr, schedule]);
 
   useEffect(schedule, [draw, tick, schedule]);
 
@@ -181,6 +199,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
       )}
       <div className="graph-scroll" ref={scroller} tabIndex={0} onKeyDown={onKey}
         role="listbox" aria-label="Storia dei commit"
+        aria-activedescendant={activeIdx >= 0 ? `${listId}-opt-${activeIdx}` : undefined}
         onScroll={(e) => {
           scrollTopRef.current = e.currentTarget.scrollTop;
           updateRange();
@@ -192,7 +211,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
           {rows.map((r, k) => {
             const i = start + k;
             return (
-              <div key={i} role="option" aria-selected={!!r && r.hash === selected}
+              <div key={i} id={`${listId}-opt-${i}`} role="option" aria-selected={!!r && r.hash === selected}
                 aria-posinset={i + 1} aria-setsize={total}
                 className={`graph-row ${r && r.hash === selected ? 'selected' : ''}`}
                 style={{ top: i * ROW_H, height: ROW_H, paddingLeft: width }}

@@ -5,9 +5,12 @@ import { laneColor, laneX, NODE_R, ROW_H, segLine } from './geometry';
 // Only the rows passed in are touched: the caller restricts them to the visible window.
 export function drawGraph(
   ctx: CanvasRenderingContext2D, rows: Array<app.RowDTO | undefined>, start: number,
-  scrollTop: number, width: number, height: number, selected: string | null,
+  scrollTop: number, width: number, height: number, selected: string | null, dpr: number,
 ) {
-  const dpr = window.devicePixelRatio || 1;
+  const css = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  const stashFill = token('--graph-stash-fill', '#16181d');
+  const selectRing = token('--graph-select-ring', '#ffffff');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
   ctx.lineWidth = 2;
@@ -30,7 +33,7 @@ export function drawGraph(
     const cy = top + ROW_H / 2;
     ctx.beginPath();
     ctx.arc(cx, cy, r.kind === 'stash' ? NODE_R - 1 : NODE_R, 0, Math.PI * 2);
-    ctx.fillStyle = r.kind === 'stash' ? '#16181d' : laneColor(r.color);
+    ctx.fillStyle = r.kind === 'stash' ? stashFill : laneColor(r.color);
     ctx.strokeStyle = laneColor(r.color);
     ctx.fill();
     ctx.stroke();

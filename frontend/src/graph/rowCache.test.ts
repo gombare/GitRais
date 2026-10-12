@@ -96,7 +96,56 @@ describe('RowCache', () => {
     const fetch = vi.fn().mockRejectedValueOnce(new Error('x')).mockImplementation(range);
     const c = new RowCache<number>(fetch, 10);
     await expect(c.ensure(0, 10)).rejects.toThrow('x');
+    c.markPartialStale(); // clears the failure backoff
     expect(await c.ensure(0, 10)).toBe(true);
     expect(c.get(3)).toBe(3);
+  });
+
+  it('refetches when markPartialStale happens while a fetch is in flight', async () => {
+    let n = 0;
+    const gates: Array<ReturnType<typeof deferred<number[]>>> = [];
+    const fetch = vi.fn(() => { const d = deferred<number[]>(); gates[n++] = d; return d.promise; });
+    const c = new RowCache<number>(fetch, 10);
+    const a = c.ensure(0, 10);
+    c.markPartialStale(); // backend grew after the first fetch started
+    const b = c.ensure(0, 10);
+    gates[0].resolve([0, 1, 2]); // old, short answer
+    gates[1].resolve([0, 1, 2, 3, 4]); // newer answer
+    await Promise.all([a, b]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(c.get(4)).toBe(4);
+  });
+
+  it('a superseded in-flight result never overwrites the newer one', async () => {
+    const gates: Array<ReturnType<typeof deferred<number[]>>> = [];
+    const fetch = vi.fn(() => { const d = deferred<number[]>(); gates.push(d); return d.promise; });
+    const c = new RowCache<number>(fetch, 10);
+    const a = c.ensure(0, 10);
+    c.markPartialStale();
+    const b = c.ensure(0, 10);
+    gates[1].resolve([0, 1, 2, 3, 4]);
+    await b;
+    gates[0].resolve([0, 1, 2]);
+    await a;
+    expect(c.get(4)).toBe(4);
+  });
+
+  it('backs off a failed page until the delay passes or markPartialStale', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(async () => { throw new Error('boom'); });
+      const c = new RowCache<number>(fetch, 10);
+      await expect(c.ensure(0, 10)).rejects.toThrow('boom');
+      expect(await c.ensure(0, 10)).toBe(false); // within backoff: no refetch, no throw
+      expect(fetch).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(5001);
+      await expect(c.ensure(0, 10)).rejects.toThrow('boom');
+      expect(fetch).toHaveBeenCalledTimes(2);
+      c.markPartialStale();
+      await expect(c.ensure(0, 10)).rejects.toThrow('boom');
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,6 +1,7 @@
 :root {
   --bg: #16181d; --bg-2: #1d2026; --bg-3: #252932; --border: #2f3440;
   --fg: #d8dce4; --fg-muted: #8b93a3; --accent: #4fa3ff; --danger: #ff6b6b; --ok: #4cd08a;
+  --graph-stash-fill: var(--bg); --graph-select-ring: #ffffff;
   --row-h: 28px; --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --mono: "SF Mono", Menlo, monospace;
 }
