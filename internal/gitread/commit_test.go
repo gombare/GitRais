@@ -1,0 +1,83 @@
+package gitread
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"gitrais/internal/testutil"
+)
+
+func TestReadCommit(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("a.txt", strings.Repeat("line\n", 20))
+	repo.Write("keep.txt", "1\n2\n3\n")
+	repo.Write("gone.txt", "bye\n")
+	root := repo.CommitAll("root")
+
+	repo.Git("mv", "a.txt", "renamed.txt")
+	repo.Write("keep.txt", "1\nTWO\n3\n4\n")
+	repo.Git("rm", "-q", "gone.txt")
+	repo.Write("bin.dat", "\x00\x01\x02")
+	repo.Git("add", "-A")
+	repo.Git("commit", "-q", "-m", "summary line\n\nbody line 1\nbody line 2")
+	head := repo.Git("rev-parse", "HEAD")
+
+	g, err := OpenRepo(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ReadCommit(context.Background(), repo.R, g, repo.Dir, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Summary != "summary line" || d.Body != "body line 1\nbody line 2" || d.Author != "Test" ||
+		len(d.Parents) != 1 || d.Parents[0] != root {
+		t.Fatalf("detail = %+v", d)
+	}
+	by := map[string]FileChange{}
+	for _, f := range d.Files {
+		by[f.Path] = f
+	}
+	if f := by["renamed.txt"]; f.Status != "R" || f.OldPath != "a.txt" {
+		t.Fatalf("rename = %+v", f)
+	}
+	if f := by["keep.txt"]; f.Status != "M" || f.Additions != 2 || f.Deletions != 1 {
+		t.Fatalf("modify = %+v", f)
+	}
+	if f := by["gone.txt"]; f.Status != "D" || f.Deletions != 1 {
+		t.Fatalf("delete = %+v", f)
+	}
+	if f := by["bin.dat"]; f.Status != "A" || !f.Binary {
+		t.Fatalf("binary = %+v", f)
+	}
+
+	rd, err := ReadCommit(context.Background(), repo.R, g, repo.Dir, root)
+	if err != nil || len(rd.Files) != 3 || len(rd.Parents) != 0 {
+		t.Fatalf("root = %+v %v", rd, err)
+	}
+}
+
+func TestChangedFilesUnusualPaths(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("base.txt", "x\n")
+	first := repo.CommitAll("base")
+	repo.Write("dir with space/né ü.txt", "a\nb\n")
+	repo.Write("quote\"d.txt", "q\n")
+	second := repo.CommitAll("odd")
+
+	files, err := ChangedFiles(context.Background(), repo.R, repo.Dir, first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]FileChange{}
+	for _, f := range files {
+		by[f.Path] = f
+	}
+	if f, ok := by["dir with space/né ü.txt"]; !ok || f.Additions != 2 || f.Status != "A" {
+		t.Fatalf("files = %+v", files)
+	}
+	if _, ok := by["quote\"d.txt"]; !ok {
+		t.Fatalf("files = %+v", files)
+	}
+}
