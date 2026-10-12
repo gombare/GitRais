@@ -125,7 +125,11 @@ func fixNoEOL(body []patchLine, resultOld bool, cr string) []patchLine {
 			out = append(out, l)
 			continue
 		}
-		fixed := patchLine{text: l.text + cr}
+		fixed := patchLine{text: l.text}
+		if !strings.HasSuffix(l.text, "\r") {
+			// a line ending in a bare CR already carries its CR: git only adds the LF
+			fixed.text += cr
+		}
 		if l.op != ' ' {
 			fixed.op = l.op
 			out = append(out, fixed)

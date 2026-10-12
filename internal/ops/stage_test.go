@@ -545,3 +545,25 @@ func TestWipDiffUnmergedIsConflicted(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialStageAfterBareCRLine(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("f.txt", "a\nb\r")
+	repo.CommitAll("base")
+	repo.Write("f.txt", "a\nb\r\nc\n")
+	fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "f.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := selectLines(fd, 0, func(l diff.Line) bool { return l.Kind == diff.Add && l.Text == "c" })
+	p, ok := diff.BuildPatch(fd, sel, diff.ForStage)
+	if !ok {
+		t.Fatal("no patch")
+	}
+	if err := ApplyPatch(bg, repo.R, repo.Dir, p, false); err != nil {
+		t.Fatalf("apply: %v\n%s", err, p)
+	}
+	if got, want := indexBlob(t, repo, "f.txt"), "a\nb\r\nc\n"; got != want {
+		t.Fatalf("index = %q, want %q\n%s", got, want, p)
+	}
+}
