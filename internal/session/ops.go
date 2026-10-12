@@ -1,0 +1,236 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+
+	"gitrais/internal/diff"
+	"gitrais/internal/gitexec"
+	"gitrais/internal/gitread"
+	"gitrais/internal/ops"
+)
+
+var (
+	// ErrPartialStageUnsupported is returned by StageLines for anything but a
+	// modified text file (added, deleted, renamed, conflicted, binary).
+	ErrPartialStageUnsupported = errors.New("partial staging is only available for modified text files")
+	// ErrHunkOutOfRange is returned by StageLines when the diff changed since the
+	// frontend read it.
+	ErrHunkOutOfRange = errors.New("invalid hunk: the file changed, reload the diff")
+	// ErrNoLinesSelected is returned by StageLines when the selection holds no
+	// added or removed line.
+	ErrNoLinesSelected = errors.New("no changed lines selected")
+	// ErrNoBranch is returned by PushCurrent with a detached or unborn HEAD.
+	ErrNoBranch = errors.New("no current branch to push")
+	// ErrNoRemote is returned by PushCurrent when no remote is configured.
+	ErrNoRemote = errors.New("no remote configured")
+	// ErrUpstreamNotRemote is returned by PushCurrent when the branch tracks
+	// something that is not a branch of a configured remote.
+	ErrUpstreamNotRemote = errors.New("the current branch's upstream is not a remote branch")
+)
+
+// StageLinesRequest stages (Staged=false) or unstages (Staged=true) a hunk or
+// some of its lines. Hunk and Lines index the FileDiff returned by WipDiff with
+// the same Path and Staged.
+type StageLinesRequest struct {
+	Path   string `json:"path"`
+	Staged bool   `json:"staged"`
+	Hunk   int    `json:"hunk"`
+	Lines  []int  `json:"lines"` // empty = whole hunk
+}
+
+func (s *Session) Stage(ctx context.Context, paths []string) error {
+	return s.write(ctx, false, func(c context.Context) error { return ops.StageFiles(c, s.r, s.Dir, paths) })
+}
+
+func (s *Session) Unstage(ctx context.Context, paths []string) error {
+	return s.write(ctx, false, func(c context.Context) error { return ops.UnstageFiles(c, s.r, s.Dir, paths) })
+}
+
+func (s *Session) StageAll(ctx context.Context) error {
+	return s.write(ctx, false, func(c context.Context) error { return ops.StageAll(c, s.r, s.Dir) })
+}
+
+func (s *Session) UnstageAll(ctx context.Context) error {
+	return s.write(ctx, false, func(c context.Context) error { return ops.UnstageAll(c, s.r, s.Dir) })
+}
+
+func (s *Session) Discard(ctx context.Context, tracked, untracked []string) error {
+	return s.write(ctx, false, func(c context.Context) error { return ops.DiscardFiles(c, s.r, s.Dir, tracked, untracked) })
+}
+
+// StageLines stages or unstages part of a modified file. The diff is re-read
+// under the write lock, so the indices must match the current state.
+func (s *Session) StageLines(ctx context.Context, req StageLinesRequest) error {
+	return s.write(ctx, false, func(c context.Context) error {
+		fd, err := ops.WipDiff(c, s.r, s.Dir, ops.WipDiffRequest{Path: req.Path, Staged: req.Staged})
+		if err != nil {
+			return err
+		}
+		// "U" (conflicted), "A", "D", "R", ... have no partial staging.
+		if fd.Binary || fd.Status != "M" {
+			return ErrPartialStageUnsupported
+		}
+		if req.Hunk < 0 || req.Hunk >= len(fd.Hunks) {
+			return ErrHunkOutOfRange
+		}
+		sel := diff.SelectHunk(fd, req.Hunk)
+		if len(req.Lines) > 0 {
+			sel = diff.Selection{req.Hunk: {}}
+			for _, l := range req.Lines {
+				if l < 0 || l >= len(fd.Hunks[req.Hunk].Lines) {
+					return ErrHunkOutOfRange
+				}
+				sel[req.Hunk][l] = true
+			}
+		}
+		mode, reverse := diff.ForStage, false
+		if req.Staged {
+			mode, reverse = diff.ForUnstage, true
+		}
+		patch, ok := diff.BuildPatch(fd, sel, mode)
+		if !ok {
+			return ErrNoLinesSelected
+		}
+		return ops.ApplyPatch(c, s.r, s.Dir, patch, reverse)
+	})
+}
+
+// CommitChanges commits the index and returns the new commit hash.
+func (s *Session) CommitChanges(ctx context.Context, o ops.CommitOptions) (string, error) {
+	var hash string
+	err := s.write(ctx, true, func(c context.Context) error {
+		var err error
+		hash, err = ops.Commit(c, s.r, s.Dir, o)
+		return err
+	})
+	return hash, err
+}
+
+func (s *Session) CreateBranch(ctx context.Context, name, start string, checkout bool) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.CreateBranch(c, s.r, s.Dir, name, start, checkout) })
+}
+
+func (s *Session) RenameBranch(ctx context.Context, oldName, newName string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.RenameBranch(c, s.r, s.Dir, oldName, newName) })
+}
+
+func (s *Session) DeleteBranch(ctx context.Context, name string, force bool) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.DeleteBranch(c, s.r, s.Dir, name, force) })
+}
+
+// DeleteRemoteBranch is a remote operation (exclusive, cancellable).
+func (s *Session) DeleteRemoteBranch(ctx context.Context, remote, branch string) error {
+	return s.remote(ctx, "delete-remote-branch", func(c context.Context, _ ops.OnProgress) error {
+		return ops.DeleteRemoteBranch(c, s.r, s.Dir, remote, branch)
+	})
+}
+
+func (s *Session) SetUpstream(ctx context.Context, branch, upstream string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.SetUpstream(c, s.r, s.Dir, branch, upstream) })
+}
+
+func (s *Session) Checkout(ctx context.Context, t ops.CheckoutTarget) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.Checkout(c, s.r, s.Dir, t) })
+}
+
+func (s *Session) CreateTag(ctx context.Context, name, target, message string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.CreateTag(c, s.r, s.Dir, name, target, message) })
+}
+
+func (s *Session) DeleteTag(ctx context.Context, name string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.DeleteTag(c, s.r, s.Dir, name) })
+}
+
+// PushTag is a remote operation (exclusive, cancellable).
+func (s *Session) PushTag(ctx context.Context, remote, name string) error {
+	return s.remote(ctx, "push-tag", func(c context.Context, _ ops.OnProgress) error {
+		return ops.PushTag(c, s.r, s.Dir, remote, name)
+	})
+}
+
+func (s *Session) StashPush(ctx context.Context, message string, untracked bool) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.StashPush(c, s.r, s.Dir, message, untracked) })
+}
+
+// StashApply applies the stash with the given commit hash (graph.Stash.Hash),
+// resolved to its current stash@{N}; ops.ErrStashNotFound if it is gone.
+func (s *Session) StashApply(ctx context.Context, hash string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.StashApply(c, s.r, s.Dir, hash) })
+}
+
+// StashPop is StashApply followed by a drop on success.
+func (s *Session) StashPop(ctx context.Context, hash string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.StashPop(c, s.r, s.Dir, hash) })
+}
+
+// StashDrop drops the stash with the given commit hash.
+func (s *Session) StashDrop(ctx context.Context, hash string) error {
+	return s.write(ctx, true, func(c context.Context) error { return ops.StashDrop(c, s.r, s.Dir, hash) })
+}
+
+// Fetch fetches all remotes. Remote operation: exclusive (ErrOpInProgress),
+// cancellable with CancelOp, progress as op:progress.
+func (s *Session) Fetch() error {
+	return s.remote(context.Background(), "fetch", func(c context.Context, p ops.OnProgress) error { return ops.Fetch(c, s.r, s.Dir, p) })
+}
+
+// Pull pulls the current branch; ops.ErrPullStrategyRequired asks the user to
+// choose a mode when branches diverged.
+func (s *Session) Pull(mode ops.PullMode) error {
+	return s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error { return ops.Pull(c, s.r, s.Dir, mode, p) })
+}
+
+// PushCurrent pushes the current branch to its upstream or, when it has none,
+// to origin (or the first remote), setting the upstream.
+func (s *Session) PushCurrent(force bool) error {
+	o, err := s.pushTarget(s.ctx, force)
+	if err != nil {
+		return err
+	}
+	return s.remote(context.Background(), "push", func(c context.Context, p ops.OnProgress) error { return ops.Push(c, s.r, s.Dir, o, p) })
+}
+
+func (s *Session) pushTarget(ctx context.Context, force bool) (ops.PushOptions, error) {
+	refs, err := gitread.ReadRefs(ctx, s.r, s.Dir)
+	if err != nil {
+		return ops.PushOptions{}, err
+	}
+	if refs.Head.Detached || refs.Head.Unborn || refs.Head.Branch == "" {
+		return ops.PushOptions{}, ErrNoBranch
+	}
+	out, err := s.r.Run(ctx, gitexec.Cmd{Dir: s.Dir, Args: []string{"remote"}, Env: gitexec.ReadOnlyEnv})
+	if err != nil {
+		return ops.PushOptions{}, err
+	}
+	remotes := strings.Fields(string(out))
+	o := ops.PushOptions{Branch: refs.Head.Branch, ForceWithLease: force}
+	upstream := ""
+	for _, r := range refs.Refs {
+		if r.IsHead && r.Kind == gitread.RefLocal {
+			upstream = r.Upstream
+		}
+	}
+	if upstream != "" {
+		// The longest matching remote name wins, so names containing "/" work.
+		for _, rm := range remotes {
+			if b, ok := strings.CutPrefix(upstream, rm+"/"); ok && b != "" && len(rm) > len(o.Remote) {
+				o.Remote, o.RemoteBranch = rm, b
+			}
+		}
+		if o.Remote == "" {
+			return ops.PushOptions{}, ErrUpstreamNotRemote
+		}
+		return o, nil
+	}
+	if len(remotes) == 0 {
+		return ops.PushOptions{}, ErrNoRemote
+	}
+	o.Remote, o.SetUpstream = remotes[0], true
+	if slices.Contains(remotes, "origin") {
+		o.Remote = "origin"
+	}
+	return o, nil
+}
