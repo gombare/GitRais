@@ -1,0 +1,34 @@
+:root {
+  --bg: #16181d; --bg-2: #1d2026; --bg-3: #252932; --border: #2f3440;
+  --fg: #d8dce4; --fg-muted: #8b93a3; --accent: #4fa3ff; --danger: #ff6b6b; --ok: #4cd08a;
+  --row-h: 28px; --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --mono: "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 13px var(--font); }
+button { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.link, button.icon { background: none; border: none; padding: 0 4px; color: var(--accent); }
+input, textarea { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font: inherit; }
+.muted { color: var(--fg-muted); }
+.app { display: flex; flex-direction: column; height: 100%; }
+.tabbar { display: flex; background: var(--bg-2); border-bottom: 1px solid var(--border); height: 34px; -webkit-app-region: drag; padding-left: 76px; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; border-right: 1px solid var(--border); cursor: pointer; -webkit-app-region: no-drag; }
+.tab.active { background: var(--bg); }
+.tab-close, .tab-new { background: none; border: none; color: var(--fg-muted); -webkit-app-region: no-drag; }
+.tab-content { flex: 1; min-height: 0; display: flex; }
+.tab-content[hidden] { display: none; }
+.welcome { margin: 48px auto; width: 640px; display: flex; flex-direction: column; gap: 16px; }
+.welcome-actions, .welcome-clone { display: flex; gap: 8px; }
+.welcome-clone input { flex: 1; }
+.repo-list { list-style: none; padding: 0; margin: 0; }
+.repo-list li { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+.repo { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.repo-body { flex: 1; display: flex; min-height: 0; }
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { background: var(--bg-3); border: 1px solid var(--danger); border-radius: 6px; padding: 10px 12px; width: 420px; }
+.toast pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--fg-muted); max-height: 200px; overflow: auto; }
+.toast-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.fatal { padding: 32px; }
+.banner { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.banner pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--fg-muted); margin: 4px 0 0; }

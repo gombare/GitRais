@@ -1,20 +1,27 @@
-import {useEffect, useState} from 'react';
-import './App.css';
-import {Version} from "../wailsjs/go/app/App";
+import { useEffect } from 'react';
+import { useApp } from './store/app';
+import { useBackendEvents } from './hooks/useBackendEvents';
+import { TabBar } from './components/TabBar';
+import { Welcome } from './components/Welcome';
+import { Toasts } from './components/Toasts';
+import { RepoView } from './components/RepoView';
 
-function App() {
-    const [version, setVersion] = useState('');
-
-    useEffect(() => {
-        Version().then(setVersion);
-    }, []);
-
-    return (
-        <div id="App">
-            <h1>Gitrais</h1>
-            <div id="result" className="result">v{version}</div>
+export default function App() {
+  const { active, init, tabs } = useApp();
+  useBackendEvents();
+  useEffect(() => {
+    init();
+  }, [init]);
+  return (
+    <div className="app">
+      <TabBar />
+      {tabs.map((t) => (
+        <div key={t.id} className="tab-content" hidden={t.id !== active}>
+          <RepoView tab={t.id} />
         </div>
-    )
+      ))}
+      {active === null && <Welcome />}
+      <Toasts />
+    </div>
+  );
 }
-
-export default App
