@@ -5,8 +5,8 @@ import { useRepo } from '../store/repo';
 
 type TabEvent = { tab: string };
 type GraphProgress = { tab: string; rows: number; done: boolean; error?: string };
-// gitexec.Progress is embedded without JSON tags, so Phase/Percent are PascalCase.
-type OpProgress = { tab: string; op: string; Phase: string; Percent: number };
+// gitexec.Progress is embedded; its JSON tags are promoted (phase, percent, current, total).
+type OpProgress = { tab: string; op: string; phase: string; percent: number; current: number; total: number };
 type AuthCancel = { id: string };
 
 export function useBackendEvents() {
@@ -20,7 +20,7 @@ export function useBackendEvents() {
         if (e.error) useApp.getState().toast(e.error, e.tab);
       }),
       on<OpProgress>('op:progress', (e) =>
-        useApp.getState().setOp(e.tab, { op: e.op, phase: e.Phase ?? '', percent: e.Percent ?? 0 })),
+        useApp.getState().setOp(e.tab, { op: e.op, phase: e.phase ?? '', percent: e.percent ?? 0 })),
       on<AuthPrompt>('auth:prompt', (p) => useApp.getState().pushAuth(p)),
       on<AuthCancel>('auth:cancel', (c) => useApp.getState().cancelAuth(c.id)),
     ];
