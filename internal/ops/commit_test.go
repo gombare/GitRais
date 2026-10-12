@@ -150,3 +150,15 @@ func TestLastCommitMessageIgnoresShowSignature(t *testing.T) {
 		t.Fatalf("got %q %v", msg, err)
 	}
 }
+
+func TestCommitOnlyUntrackedWithHook(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("a.txt", "a\n")
+	repo.CommitAll("base")
+	repo.Write("new.txt", "n\n")
+	writeHook(t, filepath.Join(repo.Dir, ".git", "hooks", "pre-commit"), "#!/bin/sh\nexit 0\n", 0o755)
+	_, err := Commit(bg, repo.R, repo.Dir, CommitOptions{Message: "x"})
+	if !errors.Is(err, ErrNothingToCommit) {
+		t.Fatalf("want ErrNothingToCommit, got %v", err)
+	}
+}

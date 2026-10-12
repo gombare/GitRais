@@ -54,7 +54,8 @@ func Commit(ctx context.Context, r *gitexec.Runner, dir string, o CommitOptions)
 		// not be mistaken for a hook rejection.
 		if gitexec.ExitCode(err) == 1 {
 			out := string(stdout)
-			if strings.Contains(out, "nothing to commit") || strings.Contains(out, "no changes added to commit") {
+			if strings.Contains(out, "nothing to commit") || strings.Contains(out, "nothing added to commit") ||
+				strings.Contains(out, "no changes added to commit") {
 				return "", ErrNothingToCommit
 			}
 		}
