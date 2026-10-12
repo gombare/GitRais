@@ -124,6 +124,43 @@ describe('WipPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Amend commit' }));
     await waitFor(() => expect(api.Commit).toHaveBeenCalledWith('t', { message: 'old\n\nbody', amend: true }));
   });
+  it('unstaging a staged rename passes both paths and the row shows old -> new', () => {
+    setFiles([f('new.txt', 'R', '.', { origPath: 'old.txt' })]);
+    mount();
+    expect(screen.getByRole('region', { name: /^In stage/ }).textContent).toContain('old.txt → new.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Unstage new.txt' }));
+    expect(api.Unstage).toHaveBeenCalledWith('t', ['old.txt', 'new.txt']);
+  });
+  it('amend prefill is never persisted as a draft and is dropped when amend is unchecked', async () => {
+    const { unmount } = mount();
+    fireEvent.click(screen.getByLabelText('Amend'));
+    await waitFor(() => expect((screen.getByLabelText('Oggetto del commit') as HTMLInputElement).value).toBe('old'));
+    fireEvent.click(screen.getByLabelText('Amend'));
+    expect((screen.getByLabelText('Oggetto del commit') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Descrizione') as HTMLTextAreaElement).value).toBe('');
+    unmount();
+    expect(api.SaveDraft.mock.calls.some((c) => (c[1] as any)?.summary === 'old')).toBe(false);
+    expect((useApp.getState().state as any).drafts['/r']).toBeUndefined();
+  });
+  it('single discard of an untracked file says it will be deleted', () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Scarta new.txt' }));
+    expect(screen.getByRole('dialog').textContent).toContain('eliminato');
+  });
+  it('discard all only acts on files still listed after the confirm', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Scarta tutto' }));
+    act(() => setFiles([f('new.txt', '?', '?', { untracked: true })]));
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    await waitFor(() => expect(api.Discard).toHaveBeenCalledWith('t', [], ['new.txt']));
+  });
+  it('refreshes the status after a successful stage', async () => {
+    const spy = vi.fn(async () => undefined);
+    useRepo.setState({ refreshStatus: spy });
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Stage a.txt' }));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith('t'));
+  });
   it('amend is unavailable on an unborn branch', () => {
     setFiles([f('a.txt', 'A', '.')], true);
     mount();

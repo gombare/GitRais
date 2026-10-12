@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { api, parseError, type AuthPrompt, type UIError } from '../api/client';
 import { isSilent } from '../api/errors';
 import type { app, store } from '../../wailsjs/go/models';
-import { useRepo } from './repo';
+import { useRepo, clearStatusSeq } from './repo';
 
 export type Toast = { id: number; tab?: string; error: UIError };
 export type OpState = { op: string; phase: string; percent: number } | null;
@@ -103,6 +103,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const { [id]: _repo, ...repos } = s.repos;
       return { repos };
     });
+    clearStatusSeq(id);
     await get().reloadState();
   },
   activate(id) {

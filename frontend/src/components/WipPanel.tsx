@@ -8,6 +8,12 @@ import { openMenu } from './ContextMenu';
 import type { status, store } from '../../wailsjs/go/models';
 
 const MAX_LISTED = 10;
+// Same grouping the panel renders; also used to re-read the lists after an async confirm.
+const groupFiles = (files: status.FileStatus[]) => ({
+  conflicted: files.filter((f) => f.conflicted),
+  unstaged: files.filter((f) => !f.conflicted && (f.workTree !== '.' || f.untracked)),
+  staged: files.filter((f) => !f.conflicted && !f.untracked && f.index !== '.'),
+});
 const nameFiles = (paths: string[]) =>
   paths.slice(0, MAX_LISTED).join('\n') + (paths.length > MAX_LISTED ? `\n… e altri ${paths.length - MAX_LISTED}` : '');
 
@@ -27,6 +33,8 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
   const saveTimer = useRef<number | undefined>(undefined);
   const busyRef = useRef(false);
   const amendSeq = useRef(0);
+  // Message put into the form by the amend prefill, while it is still unedited.
+  const prefill = useRef<{ summary: string; body: string } | null>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -38,6 +46,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
   // Writes the draft to the backend and mirrors it in the app state, so that a remount
   // (e.g. selecting a commit and coming back) restores the latest text.
   const save = (d: { summary: string; body: string }) => {
+    if (!path) return Promise.resolve();
     useApp.setState((s) => {
       if (!s.state) return s;
       const drafts = { ...s.state.drafts };
@@ -64,24 +73,40 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(flush, 500);
   };
-  const run = (p: Promise<unknown>) => p.catch((e) => toast(e, tab));
+  // Runs a mutation, then refreshes the status explicitly (watcher events may lag or be missed).
+  const run = (p: Promise<unknown>) =>
+    p.then(() => useRepo.getState().refreshStatus(tab)).catch((e) => toast(e, tab));
+  const currentGroups = () => groupFiles(useRepo.getState().repos[tab]?.status?.files ?? []);
 
   const files = st?.files ?? [];
-  const conflicted = files.filter((f) => f.conflicted);
-  const unstaged = files.filter((f) => !f.conflicted && (f.workTree !== '.' || f.untracked));
-  const staged = files.filter((f) => !f.conflicted && !f.untracked && f.index !== '.');
+  const { conflicted, unstaged, staged } = groupFiles(files);
 
   const toggleAmend = async (on: boolean) => {
     const seq = ++amendSeq.current;
     setAmend(on);
     setHookErr('');
+    const pf = prefill.current;
+    if (!on && pf) {
+      prefill.current = null;
+      // Unchecking with the text still exactly the prefill restores the (empty) previous draft.
+      if (latest.current.summary === pf.summary && latest.current.body === pf.body) {
+        window.clearTimeout(saveTimer.current);
+        dirty.current = false;
+        latest.current = { summary: '', body: '' };
+        setSummary(''); setBody('');
+      }
+    }
     if (on && !latest.current.summary && !latest.current.body) {
       try {
         const m = splitMessage(await api.LastCommitMessage(tab));
         // Ignore the answer if amend was toggled again, or the user typed, meanwhile.
         if (amendSeq.current !== seq || latest.current.summary || latest.current.body) return;
+        // Save any pending (empty) edit first so the prefill is never flushed as a draft.
+        flush();
+        prefill.current = m;
+        // The prefill is deliberately not persisted: it only becomes a draft once the user edits it.
+        latest.current = m;
         setSummary(m.summary); setBody(m.body);
-        persist(m.summary, m.body);
       } catch (e) {
         if (amendSeq.current === seq) setAmend(false);
         toast(e, tab);
@@ -97,6 +122,8 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
     try {
       await api.Commit(tab, { message: buildMessage(sent.summary, sent.body), amend } as any);
       setAmend(false);
+      prefill.current = null;
+      void useRepo.getState().refreshStatus(tab);
       // Clear the form only if the user did not keep typing while the commit ran.
       if (latest.current.summary === sent.summary && latest.current.body === sent.body) {
         window.clearTimeout(saveTimer.current);
@@ -116,8 +143,14 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
     }
   };
   const discard = async (f: status.FileStatus) => {
-    if (!(await confirmAction({ title: 'Scarta modifiche', message: `Scartare le modifiche a ${f.path}? Operazione irreversibile.`, danger: true }))) return;
-    await run(f.untracked ? api.Discard(tab, [], [f.path]) : api.Discard(tab, [f.path], []));
+    const message = f.untracked
+      ? `Il file non tracciato ${f.path} verrà eliminato. Operazione irreversibile.`
+      : `Scartare le modifiche a ${f.path}? Operazione irreversibile.`;
+    if (!(await confirmAction({ title: f.untracked ? 'Elimina file' : 'Scarta modifiche', message, danger: true }))) return;
+    // The status may have changed while the dialog was open: act only if the file is still listed as such.
+    const cur = currentGroups().unstaged.find((g) => g.path === f.path && g.untracked === f.untracked);
+    if (!cur) return;
+    await run(cur.untracked ? api.Discard(tab, [], [cur.path]) : api.Discard(tab, [cur.path], []));
   };
   const discardAll = async () => {
     const tracked = unstaged.filter((f) => !f.untracked).map((f) => f.path);
@@ -127,7 +160,13 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
       message: `Scartare le modifiche a ${tracked.length + untracked.length} file? I file non tracciati verranno eliminati. Operazione irreversibile.\n\n${nameFiles([...tracked, ...untracked])}`,
       danger: true,
     });
-    if (ok) await run(api.Discard(tab, tracked, untracked));
+    if (!ok) return;
+    // Intersect with the lists as they are now: only files that were shown in the dialog are touched.
+    const now = currentGroups().unstaged;
+    const listed = new Set([...tracked, ...untracked]);
+    const t = now.filter((f) => !f.untracked && listed.has(f.path)).map((f) => f.path);
+    const u = now.filter((f) => f.untracked && listed.has(f.path)).map((f) => f.path);
+    if (t.length || u.length) await run(api.Discard(tab, t, u));
   };
 
   const row = (f: status.FileStatus, group: 'conflict' | 'unstaged' | 'staged') => {
@@ -145,7 +184,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
         </button>
         {group === 'unstaged' && <button className="file-btn" aria-label={`Scarta ${f.path}`} onClick={() => discard(f)}>Scarta</button>}
         {group === 'staged'
-          ? <button className="file-btn" aria-label={`Unstage ${f.path}`} onClick={() => run(api.Unstage(tab, [f.path]))}>Unstage</button>
+          ? <button className="file-btn" aria-label={`Unstage ${f.path}`} onClick={() => run(api.Unstage(tab, f.origPath ? [f.origPath, f.path] : [f.path]))}>Unstage</button>
           : <button className="file-btn" aria-label={group === 'conflict' ? `Segna risolto ${f.path}` : `Stage ${f.path}`}
               title={group === 'conflict' ? 'Aggiunge il file all’indice, segnando il conflitto come risolto' : undefined}
               onClick={() => run(api.Stage(tab, [f.path]))}>{group === 'conflict' ? 'Segna risolto' : 'Stage'}</button>}

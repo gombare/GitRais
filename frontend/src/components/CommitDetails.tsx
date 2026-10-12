@@ -25,7 +25,7 @@ export function CommitDetails({ tab, hash }: { tab: string; hash: string }) {
       {d.body && <pre className="detail-body">{d.body}</pre>}
       <dl className="detail-meta">
         <dt>Autore</dt><dd>{d.author} &lt;{d.authorEmail}&gt;</dd>
-        <dt>Data</dt><dd>{new Date(d.authorTime * 1000).toLocaleString()}</dd>
+        <dt>Data</dt><dd>{new Date(d.authorTime * 1000).toLocaleString('it-IT')}</dd>
         <dt>Commit</dt>
         <dd>
           <button className="link mono" title="Copia l’hash completo" aria-label={`Copia hash ${d.hash}`}

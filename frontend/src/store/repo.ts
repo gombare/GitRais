@@ -43,6 +43,9 @@ type RepoStore = {
 // Latest status request per tab: out-of-order responses (event storms) are dropped.
 const statusSeq = new Map<string, number>();
 
+// Drops the bookkeeping of a closed tab.
+export const clearStatusSeq = (tab: string) => { statusSeq.delete(tab); };
+
 export const useRepo = create<RepoStore>((set, get) => ({
   repos: {},
   get(tab) {
