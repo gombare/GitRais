@@ -8,6 +8,17 @@
 // The bundled git configures osxkeychain, which is consulted first; askpass runs
 // only when no helper supplies the credential. Prompts and answers are never
 // logged by this package.
+//
+// Keychain side effects: when git obtains a credential through askpass and the
+// operation succeeds, git runs `credential approve`, which stores the typed
+// password in the user's keychain via the bundled osxkeychain helper. When the
+// server answers 401, git runs `credential reject`, which erases any existing
+// keychain entry for that URL. Callers should be aware of both effects.
+//
+// Security model: the directory holding the socket is created with mode 0700
+// and is the main protection. The token only guards against other users; any
+// process of the same uid can read it from the environment of git and the
+// helper, and could equally connect to the socket.
 package askpass
 
 import (
@@ -21,6 +32,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,8 +51,13 @@ const (
 	ioTimeout = 10 * time.Second
 )
 
-// Handler answers a prompt. ctx is cancelled when the Server is closed.
-// ok=false means the user cancelled.
+// maxSockPath is the longest socket path used before falling back to /tmp
+// (sun_path is 104 bytes on macOS, 108 on Linux).
+const maxSockPath = 100
+
+// Handler answers a prompt. ctx is cancelled when the Server is closed or when
+// the requesting helper disconnects (e.g. the git operation was cancelled).
+// ok=false means the user cancelled. Answers containing a line break are refused.
 type Handler func(ctx context.Context, prompt string) (answer string, ok bool)
 
 type Server struct {
@@ -74,6 +91,13 @@ func Start(h Handler) (*Server, error) {
 	dir, err := os.MkdirTemp("", "gitrais-ap-") // created with mode 0700
 	if err != nil {
 		return nil, err
+	}
+	if len(filepath.Join(dir, "s")) > maxSockPath {
+		// TMPDIR is too long for a Unix socket path: use a short fixed location.
+		os.RemoveAll(dir)
+		if dir, err = os.MkdirTemp("/tmp", "gitrais-ap-"); err != nil {
+			return nil, err
+		}
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		os.RemoveAll(dir)
@@ -151,7 +175,21 @@ func (s *Server) serve(c net.Conn) {
 	}
 	resp := response{}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(s.token)) == 1 {
-		resp = s.ask(req.Prompt)
+		// The request is read: drop the read deadline and watch for the helper
+		// going away, which cancels the per-request context.
+		c.SetReadDeadline(time.Time{})
+		ctx, cancel := context.WithCancel(s.ctx)
+		defer cancel()
+		go func() {
+			var b [1]byte
+			for {
+				if _, err := c.Read(b[:]); err != nil {
+					cancel()
+					return
+				}
+			}
+		}()
+		resp = s.ask(ctx, req.Prompt)
 	}
 	b, _ := json.Marshal(resp)
 	c.SetWriteDeadline(time.Now().Add(ioTimeout))
@@ -159,20 +197,30 @@ func (s *Server) serve(c net.Conn) {
 }
 
 // ask runs the handler so that Close never waits for one that ignores its ctx
-// (such a handler goroutine is abandoned and its answer discarded).
-func (s *Server) ask(prompt string) response {
+// (such a handler goroutine is abandoned and its answer discarded). A panicking
+// handler or an answer with a line break is mapped to a refusal.
+func (s *Server) ask(ctx context.Context, prompt string) response {
 	ch := make(chan response, 1)
 	go func() {
-		a, ok := s.handler(s.ctx, prompt)
+		defer func() {
+			if recover() != nil {
+				ch <- response{}
+			}
+		}()
+		a, ok := s.handler(ctx, prompt)
+		if strings.ContainsAny(a, "\r\n") {
+			ch <- response{}
+			return
+		}
 		ch <- response{OK: ok, Answer: a}
 	}()
 	select {
 	case r := <-ch:
-		if s.ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return response{}
 		}
 		return r
-	case <-s.ctx.Done():
+	case <-ctx.Done():
 		return response{}
 	}
 }

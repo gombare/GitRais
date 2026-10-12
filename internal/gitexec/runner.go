@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -48,7 +47,7 @@ func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
 	default:
 		cmd.Stdin = &ctxReader{ctx: ctx, r: in}
 	}
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	setProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	return cmd
 }

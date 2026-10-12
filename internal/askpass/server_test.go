@@ -142,3 +142,68 @@ func TestCloseUnblocksIgnoringHandler(t *testing.T) {
 		t.Fatal("Close hangs on a handler that ignores ctx")
 	}
 }
+
+func TestStartLongTmpdir(t *testing.T) {
+	long := filepath.Join(t.TempDir(), strings.Repeat("d", 60), strings.Repeat("e", 60))
+	if err := os.MkdirAll(long, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", long)
+	s, err := Start(func(context.Context, string) (string, bool) { return "ok", true })
+	if err != nil {
+		t.Fatalf("Start with long TMPDIR: %v", err)
+	}
+	defer s.Close()
+	if len(s.sock) > 100 {
+		t.Fatalf("socket path too long: %d", len(s.sock))
+	}
+	if ans, err := Ask(s.sock, s.token, "p"); err != nil || ans != "ok" {
+		t.Fatalf("ans=%q err=%v", ans, err)
+	}
+}
+
+func TestAskRejectsMultilineAnswer(t *testing.T) {
+	for _, a := range []string{"a\nb", "a\rb", "a\n"} {
+		s, _ := Start(func(context.Context, string) (string, bool) { return a, true })
+		if got, err := Ask(s.sock, s.token, "p"); err == nil {
+			t.Errorf("answer %q forwarded as %q", a, got)
+		}
+		s.Close()
+	}
+}
+
+func TestAskHandlerPanic(t *testing.T) {
+	s, _ := Start(func(context.Context, string) (string, bool) { panic("boom") })
+	defer s.Close()
+	if _, err := Ask(s.sock, s.token, "p"); err == nil {
+		t.Fatal("panicking handler produced an answer")
+	}
+	// The server must still be alive.
+	if _, err := Ask(s.sock, s.token, "p"); err == nil {
+		t.Fatal("second call should also be refused, not crash")
+	}
+}
+
+func TestHandlerCtxCancelledWhenClientDisconnects(t *testing.T) {
+	started := make(chan struct{})
+	done := make(chan struct{})
+	s, _ := Start(func(ctx context.Context, _ string) (string, bool) {
+		close(started)
+		<-ctx.Done()
+		close(done)
+		return "", false
+	})
+	defer s.Close()
+	c, err := net.Dial("unix", s.sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Write([]byte(`{"token":"` + s.token + `","prompt":"p"}` + "\n"))
+	<-started
+	c.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler ctx not cancelled after client disconnect")
+	}
+}

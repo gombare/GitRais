@@ -192,3 +192,62 @@ func TestE2EWrongPasswordNoLeak(t *testing.T) {
 }
 
 func asGitError(err error, target **gitexec.GitError) bool { return errors.As(err, target) }
+
+func TestE2ECancelDuringPrompt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("e2e")
+	}
+	r, _ := e2eRunner(t)
+	url := httpRemote(t, r, "alice", e2ePassword)
+	prompted := make(chan struct{}, 1)
+	handlerDone := make(chan struct{})
+	s, err := Start(func(ctx context.Context, _ string) (string, bool) {
+		prompted <- struct{}{}
+		<-ctx.Done()
+		close(handlerDone)
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	helper := buildHelper(t) // unique path: used to find leftover helper processes
+	r.Env = append(r.Env, s.Env(helper)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	var start time.Time
+	go func() { errCh <- ops.Clone(ctx, r, url, filepath.Join(t.TempDir(), "c"), nil) }()
+	select {
+	case <-prompted:
+	case <-time.After(20 * time.Second):
+		t.Fatal("no prompt arrived")
+	}
+	start = time.Now()
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("clone did not return after cancel")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("clone took %v to return after cancel", d)
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler ctx was not cancelled when the helper died")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		out, _ := exec.Command("pgrep", "-f", helper).Output()
+		if len(bytes.TrimSpace(out)) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("askpass-helper still running: %s", out)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
