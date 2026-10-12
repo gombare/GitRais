@@ -19,6 +19,8 @@ type CommitOptions struct {
 var (
 	// ErrEmptyMessage is returned when the commit message is blank.
 	ErrEmptyMessage = errors.New("commit message is empty")
+	// ErrNothingToCommit is returned when there is nothing staged to commit.
+	ErrNothingToCommit = errors.New("nothing to commit")
 	// ErrNothingToAmend is returned when amending on an unborn branch.
 	ErrNothingToAmend = errors.New("cannot amend: the branch has no commits yet")
 )
@@ -46,10 +48,20 @@ func Commit(ctx context.Context, r *gitexec.Runner, dir string, o CommitOptions)
 		}
 		args = append(args, "--amend")
 	}
-	_, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: args, Stdin: strings.NewReader(o.Message)})
+	stdout, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: args, Stdin: strings.NewReader(o.Message)})
 	if err != nil {
+		// "Nothing to commit" is reported on stdout with exit code 1; it must
+		// not be mistaken for a hook rejection.
+		if gitexec.ExitCode(err) == 1 {
+			out := string(stdout)
+			if strings.Contains(out, "nothing to commit") || strings.Contains(out, "no changes added to commit") {
+				return "", ErrNothingToCommit
+			}
+		}
+		// Hooks reject with exit code 1; identity, signing and merge-state
+		// failures exit 128 and keep their original classification.
 		var ge *gitexec.GitError
-		if errors.As(err, &ge) && ge.Kind == gitexec.KindUnknown && hooksPresent(ctx, r, dir) {
+		if errors.As(err, &ge) && ge.ExitCode == 1 && ge.Kind == gitexec.KindUnknown && hooksPresent(ctx, r, dir) {
 			ge.Kind = gitexec.KindHookRejected
 		}
 		return "", err
@@ -65,7 +77,7 @@ func LastCommitMessage(ctx context.Context, r *gitexec.Runner, dir string) (stri
 	if err != nil || !ok {
 		return "", err
 	}
-	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"log", "-1", "--format=%B"}, Env: gitexec.ReadOnlyEnv})
+	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"log", "-1", "--no-show-signature", "--format=%B"}, Env: gitexec.ReadOnlyEnv})
 	return strings.TrimRight(string(out), "\n"), err
 }
 
