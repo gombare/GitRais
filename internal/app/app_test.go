@@ -608,8 +608,8 @@ func TestInitAndClone(t *testing.T) {
 		t.Fatalf("init = %+v %v", tab, err)
 	}
 
-	dest := filepath.Join(t.TempDir(), "clone")
-	ct, err := a.CloneRepo(bare, dest)
+	parent := t.TempDir()
+	ct, err := a.CloneRepo(bare, parent)
 	if err != nil {
 		t.Fatalf("clone = %v", err)
 	}
@@ -619,7 +619,13 @@ func TestInitAndClone(t *testing.T) {
 			t.Fatalf("clone progress with tab: %+v", op)
 		}
 	}
-	_, err = a.CloneRepo(bare, dest)
+	if want, _ := filepath.EvalSymlinks(filepath.Join(parent, "remote")); ct.Path != want {
+		t.Fatalf("clone path = %q", ct.Path)
+	}
+	if _, err = a.CloneRepo(bare, "relative/dir"); decodeUIError(t, err).Kind != "InvalidPath" {
+		t.Fatalf("relative parent = %v", err)
+	}
+	_, err = a.CloneRepo(bare, parent)
 	if ue := decodeUIError(t, err); ue.Kind != "DestNotEmpty" {
 		t.Fatalf("clone into non-empty dir = %+v", ue)
 	}
@@ -748,5 +754,29 @@ func TestAuthTimeoutStartsWhenShown(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("prompt not answered")
+	}
+}
+
+func TestRepoNameFromURL(t *testing.T) {
+	ok := map[string]string{
+		"https://github.com/o/repo.git":  "repo",
+		"https://github.com/o/repo":      "repo",
+		"https://github.com/o/repo/":     "repo",
+		"https://github.com/o/repo.git/": "repo",
+		"git@github.com:owner/repo.git":  "repo",
+		"git@host:repo.git":              "repo",
+		"/tmp/x/remote.git":              "remote",
+		"ssh://git@h:22/o/r.name.git":    "r.name",
+		`C:\src\proj.git`:                "proj",
+	}
+	for in, want := range ok {
+		if got, err := repoNameFromURL(in); err != nil || got != want {
+			t.Errorf("repoNameFromURL(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "  ", ".", "..", "/", "https://h/o/..", "https://h/o/.git", "host:", "https://h/-x"} {
+		if got, err := repoNameFromURL(in); err == nil {
+			t.Errorf("repoNameFromURL(%q) = %q, want error", in, got)
+		}
 	}
 }

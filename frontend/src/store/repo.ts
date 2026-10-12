@@ -42,13 +42,21 @@ export const useRepo = create<RepoStore>((set, get) => ({
     return get().repos[tab] ?? empty();
   },
   patch(tab, p) {
+    // Ignore tabs that are not open (late events/responses for a closed tab).
+    if (!useApp.getState().tabs.some((t) => t.id === tab)) return;
     set((s) => ({ repos: { ...s.repos, [tab]: { ...(s.repos[tab] ?? empty()), ...p } } }));
   },
   async refresh(tab) {
     await Promise.all([get().refreshRefs(tab), get().refreshStatus(tab)]);
+    const version = get().get(tab).graphVersion;
     try {
       const gi = await api.GraphInfo(tab);
-      get().patch(tab, { graphRows: gi.rows, graphDone: gi.done });
+      // Progress events may have advanced past this snapshot: never regress rows/done,
+      // and drop the snapshot if the graph was reset meanwhile.
+      const cur = get().get(tab);
+      if (cur.graphVersion === version) {
+        get().patch(tab, { graphRows: Math.max(cur.graphRows, gi.rows), graphDone: cur.graphDone || gi.done });
+      }
     } catch (e) {
       useApp.getState().toast(e, tab);
     }

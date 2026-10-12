@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { api } from '../api/client';
+import { displayName } from '../api/paths';
 import { useApp } from '../store/app';
 
-function repoNameFromUrl(url: string): string {
-  const last = url.trim().replace(/\/+$/, '').split(/[/:]/).pop() ?? 'repo';
-  return last.replace(/\.git$/, '') || 'repo';
-}
-
 export function Welcome() {
-  const { state, startupError, open, addTab, toast, reloadState } = useApp();
+  const state = useApp((s) => s.state);
+  const startupError = useApp((s) => s.startupError);
+  const open = useApp((s) => s.open);
+  const addTab = useApp((s) => s.addTab);
+  const toast = useApp((s) => s.toast);
+  const reloadState = useApp((s) => s.reloadState);
+  const runOp = useApp((s) => s.runOp);
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const favorites = state?.favorites ?? [];
@@ -32,11 +34,19 @@ export function Welcome() {
     }
   };
   const clone = async () => {
+    if (!url.trim()) return;
+    let parent: string;
+    try {
+      parent = await api.PickDirectory('Dove clonare');
+    } catch (e) {
+      toast(e);
+      return;
+    }
+    if (!parent) return;
     setBusy(true);
     try {
-      const parent = await api.PickDirectory('Dove clonare');
-      if (!parent || !url.trim()) return;
-      addTab(await api.CloneRepo(url.trim(), `${parent}/${repoNameFromUrl(url)}`));
+      // The backend derives the repository directory name from the URL.
+      addTab(await runOp('', 'clone', () => api.CloneRepo(url.trim(), parent)));
       setUrl('');
       await reloadState();
     } catch (e) {
@@ -78,9 +88,9 @@ export function Welcome() {
           <ul className="repo-list">
             {list.map((p) => (
               <li key={p}>
-                <button className="link" onClick={() => open(p)}>{p.split('/').pop()}</button>
+                <button className="link" onClick={() => open(p)}>{displayName(p)}</button>
                 <span className="muted">{p}</span>
-                <button className="icon" onClick={() => star(p)} aria-label="Preferito">
+                <button className="icon" onClick={() => star(p)} aria-label="Preferito" aria-pressed={favorites.includes(p)}>
                   {favorites.includes(p) ? '★' : '☆'}
                 </button>
               </li>

@@ -7,7 +7,9 @@ import { Toasts } from './components/Toasts';
 import { RepoView } from './components/RepoView';
 
 export default function App() {
-  const { active, init, tabs } = useApp();
+  const active = useApp((s) => s.active);
+  const init = useApp((s) => s.init);
+  const tabs = useApp((s) => s.tabs);
   useBackendEvents();
   useEffect(() => {
     init();

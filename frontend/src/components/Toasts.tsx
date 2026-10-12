@@ -3,12 +3,15 @@ import { describeError } from '../api/errors';
 import { useApp } from '../store/app';
 
 export function Toasts() {
-  const { toasts, dismiss, toast } = useApp();
+  const toasts = useApp((s) => s.toasts);
+  const dismiss = useApp((s) => s.dismiss);
+  const toast = useApp((s) => s.toast);
+  const runOp = useApp((s) => s.runOp);
   const act = async (id: number, action: string, tab?: string) => {
     dismiss(id);
     if (!tab) return;
     try {
-      if (action === 'pull') await api.Pull(tab, '');
+      if (action === 'pull') await runOp(tab, 'pull', () => api.Pull(tab, ''));
     } catch (e) {
       toast(e, tab);
     }

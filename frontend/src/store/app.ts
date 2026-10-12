@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api, parseError, type AuthPrompt, type UIError } from '../api/client';
 import { isSilent } from '../api/errors';
 import type { app, store } from '../../wailsjs/go/models';
+import { useRepo } from './repo';
 
 export type Toast = { id: number; tab?: string; error: UIError };
 export type OpState = { op: string; phase: string; percent: number } | null;
@@ -24,6 +25,11 @@ type AppStore = {
   toast(e: unknown, tab?: string): void;
   dismiss(id: number): void;
   setOp(tab: string, op: OpState): void;
+  // Applies an `op:progress` event: ignored unless the op was started through runOp on a live tab.
+  progressOp(tab: string, op: NonNullable<OpState>): void;
+  // Marks `op` as running on `tab` (use '' for tab-less ops such as clone) for the duration of fn.
+  // ops[tab] is cleared when fn settles, on success or error; the error is rethrown.
+  runOp<T>(tab: string, op: string, fn: () => Promise<T>): Promise<T>;
   pushAuth(p: AuthPrompt): void;
   shiftAuth(): void;
   cancelAuth(id: string): void;
@@ -47,10 +53,14 @@ export const useApp = create<AppStore>((set, get) => ({
       get().toast(e);
     }
     try {
-      const tabs = (await api.RestoreTabs()) ?? [];
+      const restored = (await api.RestoreTabs()) ?? [];
       const state = await api.GetState();
-      const active = tabs.find((t) => t.id === state.activeTab)?.id ?? tabs[0]?.id ?? null;
-      set({ tabs, state, active });
+      // Tabs opened by the user while RestoreTabs ran must survive: merge instead of replacing.
+      set((s) => {
+        const tabs = [...restored, ...s.tabs.filter((t) => !restored.some((r) => r.id === t.id))];
+        const active = s.active ?? tabs.find((t) => t.id === state.activeTab)?.id ?? tabs[0]?.id ?? null;
+        return { tabs, state, active };
+      });
     } catch (e) {
       get().toast(e);
       // Welcome still needs the state (recents/favorites) even when the tabs failed to restore.
@@ -79,7 +89,17 @@ export const useApp = create<AppStore>((set, get) => ({
     }
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
-      return { tabs, active: s.active === id ? (tabs.at(-1)?.id ?? null) : s.active };
+      const { [id]: _op, ...ops } = s.ops;
+      return {
+        tabs,
+        ops,
+        toasts: s.toasts.filter((t) => t.tab !== id),
+        active: s.active === id ? (tabs.at(-1)?.id ?? null) : s.active,
+      };
+    });
+    useRepo.setState((s) => {
+      const { [id]: _repo, ...repos } = s.repos;
+      return { repos };
     });
     await get().reloadState();
   },
@@ -107,6 +127,22 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   setOp(tab, op) {
     set((s) => ({ ops: { ...s.ops, [tab]: op } }));
+  },
+  progressOp(tab, op) {
+    if (tab !== '' && !get().tabs.some((t) => t.id === tab)) return;
+    if (!get().ops[tab]) return;
+    get().setOp(tab, op);
+  },
+  async runOp(tab, op, fn) {
+    get().setOp(tab, { op, phase: '', percent: 0 });
+    try {
+      return await fn();
+    } finally {
+      set((s) => {
+        const { [tab]: _done, ...ops } = s.ops;
+        return { ops };
+      });
+    }
   },
   pushAuth(p) {
     set((s) => ({ authQueue: [...s.authQueue, p] }));

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"gitrais/internal/diff"
 	"gitrais/internal/gitexec"
@@ -402,13 +403,38 @@ func (a *App) CancelOp(tab string) error {
 	return do(a, tab, func(s *session.Session) error { s.CancelOp(); return nil })
 }
 
-// CloneRepo clones url into dest (absolute, missing or empty) and opens it.
+// repoNameFromURL derives the directory name for a clone from a remote URL:
+// the last path segment without a trailing ".git" (also for scp-like
+// "git@host:owner/repo.git"). Empty, "." / ".." and names containing path
+// separators are rejected.
+func repoNameFromURL(url string) (string, error) {
+	u := strings.TrimRight(strings.TrimSpace(url), "/\\")
+	if i := strings.LastIndexAny(u, "/\\:"); i >= 0 {
+		u = u[i+1:]
+	}
+	u = strings.TrimSuffix(u, ".git")
+	if u == "" || u == "." || u == ".." || strings.ContainsAny(u, "/\\") || strings.HasPrefix(u, "-") {
+		return "", errInvalidPath
+	}
+	return u, nil
+}
+
+// CloneRepo clones url into parentDir (absolute) under a directory name
+// derived from the URL, and opens it. The frontend never builds paths.
 // Progress is emitted as op:progress with tab "" and op "clone". Only one
 // clone runs at a time (OpInProgress otherwise); CancelClone aborts it.
-func (a *App) CloneRepo(url, dest string) (TabInfo, error) {
+func (a *App) CloneRepo(url, parentDir string) (TabInfo, error) {
 	if err := a.ready(); err != nil {
 		return TabInfo{}, uiErr(err)
 	}
+	if parentDir == "" || !filepath.IsAbs(parentDir) {
+		return TabInfo{}, uiErr(errInvalidPath)
+	}
+	name, err := repoNameFromURL(url)
+	if err != nil {
+		return TabInfo{}, uiErr(err)
+	}
+	dest := filepath.Join(parentDir, name)
 	a.cloneMu.Lock()
 	if a.cloneCancel != nil {
 		a.cloneMu.Unlock()
@@ -423,7 +449,7 @@ func (a *App) CloneRepo(url, dest string) (TabInfo, error) {
 		a.cloneMu.Unlock()
 		cancel()
 	}()
-	err := ops.Clone(ctx, a.runner, url, dest, func(p gitexec.Progress) {
+	err = ops.Clone(ctx, a.runner, url, dest, func(p gitexec.Progress) {
 		a.emit(session.EventOpProgress, session.OpProgress{Op: "clone", Progress: p})
 	})
 	if err != nil {

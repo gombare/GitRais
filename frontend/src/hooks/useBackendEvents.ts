@@ -20,7 +20,7 @@ export function useBackendEvents() {
         if (e.error) useApp.getState().toast(e.error, e.tab);
       }),
       on<OpProgress>('op:progress', (e) =>
-        useApp.getState().setOp(e.tab, { op: e.op, phase: e.phase ?? '', percent: e.percent ?? 0 })),
+        useApp.getState().progressOp(e.tab, { op: e.op, phase: e.phase ?? '', percent: e.percent ?? 0 })),
       on<AuthPrompt>('auth:prompt', (p) => useApp.getState().pushAuth(p)),
       on<AuthCancel>('auth:cancel', (c) => useApp.getState().cancelAuth(c.id)),
     ];
