@@ -89,13 +89,13 @@ func TestLoadCancel(t *testing.T) {
 	}
 }
 
-func TestLoadSeparatoriNelTesto(t *testing.T) {
+func TestLoadSeparatorsInText(t *testing.T) {
 	repo := testutil.NewRepo(t)
 	repo.Write("a.txt", "1\n")
 	repo.CommitAll("base")
 	subj := "hello\x1eworld\x1fx"
 	repo.Git("commit", "--allow-empty", "-m", subj)
-	repo.Git("commit", "--allow-empty", "-m", "dopo")
+	repo.Git("commit", "--allow-empty", "-m", "after")
 	idx := NewIndex()
 	if err := Load(context.Background(), repo.R, repo.Dir, idx, LoadOptions{}); err != nil {
 		t.Fatal(err)
@@ -109,13 +109,13 @@ func TestLoadSeparatoriNelTesto(t *testing.T) {
 	}
 }
 
-func TestLoadStashConBaseIrraggiungibile(t *testing.T) {
+func TestLoadStashWithUnreachableBase(t *testing.T) {
 	repo := testutil.NewRepo(t)
 	repo.Write("a.txt", "1\n")
 	repo.CommitAll("base")
 	repo.Git("switch", "-q", "-c", "tmp")
 	repo.Write("b.txt", "b\n")
-	tmpC := repo.CommitAll("su tmp")
+	tmpC := repo.CommitAll("on tmp")
 	repo.Write("b.txt", "dirty\n")
 	repo.Git("stash", "push", "-q", "-m", "wip")
 	stashHash := repo.Git("rev-parse", "stash@{0}")
@@ -137,7 +137,7 @@ func TestLoadStashConBaseIrraggiungibile(t *testing.T) {
 	}
 }
 
-func TestLoadProgressSenzaDuplicati(t *testing.T) {
+func TestLoadProgressNoDuplicates(t *testing.T) {
 	repo := testutil.NewRepo(t)
 	for i := 0; i < 4; i++ {
 		repo.Git("commit", "--allow-empty", "-m", "c")

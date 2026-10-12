@@ -36,9 +36,14 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 	}
 	stashByBase := map[string][]Stash{}
 	for _, s := range opt.Stashes {
+		if s.Base == "" {
+			continue
+		}
+		if _, seen := stashByBase[s.Base]; !seen {
+			// the base may be unreachable from refs: include it so the stash row gets placed
+			revs = append(revs, s.Base)
+		}
 		stashByBase[s.Base] = append(stashByBase[s.Base], s)
-		// the base may be unreachable from refs: include it so the stash row gets placed
-		revs = append(revs, s.Base)
 	}
 	var (
 		layout   Layout
@@ -67,7 +72,7 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 			}
 		}
 	}
-	args := append([]string{"log", "-z", "--topo-order", "--no-color", logFormat}, revs...)
+	args := append([]string{"log", "-z", "--topo-order", "--no-color", logFormat}, append(revs, "--")...)
 	err = r.Stream(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: gitexec.ReadOnlyEnv}, 0, func(rec []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
