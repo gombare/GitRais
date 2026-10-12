@@ -53,7 +53,10 @@ var noiseRE = regexp.MustCompile(`^(?:remote: )?(?:Enumerating|Counting|Compress
 // skipping progress output, and fall back to the first non-noise line.
 func summarize(stderr string) string {
 	var fallback, first string
-	for _, raw := range strings.Split(stderr, "\n") {
+	// Progress updates end in \r, so an error printed mid-progress shares a
+	// \n-line with them: judge every \r/\n segment on its own.
+	segments := strings.FieldsFunc(stderr, func(r rune) bool { return r == '\n' || r == '\r' })
+	for _, raw := range segments {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -61,13 +64,14 @@ func summarize(stderr string) string {
 		if first == "" {
 			first = line
 		}
-		if strings.ContainsRune(line, '\r') || noiseRE.MatchString(line) {
+		if noiseRE.MatchString(line) {
 			continue
 		}
 		if _, ok := ParseProgressLine(line); ok {
 			continue
 		}
-		if strings.HasPrefix(line, "fatal:") || strings.HasPrefix(line, "error:") || strings.HasPrefix(line, "! [") {
+		msg := strings.TrimPrefix(line, "remote: ")
+		if strings.HasPrefix(msg, "fatal:") || strings.HasPrefix(msg, "error:") || strings.HasPrefix(line, "! [") {
 			return line
 		}
 		if fallback == "" {

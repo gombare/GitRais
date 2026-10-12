@@ -186,7 +186,10 @@ func Clone(ctx context.Context, r *gitexec.Runner, url, dest string, p OnProgres
 	if err != nil {
 		if created {
 			_ = os.RemoveAll(dest)
-		} else if entries, rerr := os.ReadDir(dest); rerr == nil {
+		} else if fi, lerr := os.Lstat(dest); ctx.Err() != nil && lerr == nil && fi.IsDir() {
+			// git removes its own partial clone on ordinary failures; only a
+			// killed git leaves debris in the pre-existing (empty) directory.
+			entries, _ := os.ReadDir(dest)
 			for _, e := range entries {
 				_ = os.RemoveAll(filepath.Join(dest, e.Name()))
 			}

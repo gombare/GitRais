@@ -96,3 +96,15 @@ func TestClassifyStaleInfoAndPullRebaseDirty(t *testing.T) {
 		}
 	}
 }
+
+func TestSummarizeSplitsOnCR(t *testing.T) {
+	cases := map[string]string{
+		"Receiving objects:  45% (9/20)\rfatal: the remote end hung up unexpectedly\n":                                     "fatal: the remote end hung up unexpectedly",
+		"Writing objects:  50% (1/2)\rremote: fatal: pack exceeds maximum allowed size\nerror: failed to push some refs\n": "remote: fatal: pack exceeds maximum allowed size",
+	}
+	for in, want := range cases {
+		if got := summarize(in); got != want {
+			t.Errorf("summarize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
