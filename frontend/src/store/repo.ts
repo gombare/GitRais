@@ -5,7 +5,8 @@ import { useApp } from './app';
 
 export type Selection = { kind: 'wip' } | { kind: 'commit'; hash: string };
 export type DiffTarget =
-  | { kind: 'wip'; path: string; staged: boolean; untracked: boolean }
+  // oldPath: pre-rename path of a staged rename (old side of the staged diff).
+  | { kind: 'wip'; path: string; staged: boolean; untracked: boolean; oldPath?: string }
   | { kind: 'commit'; hash: string; path: string; oldPath: string };
 
 export type RepoState = {

@@ -120,3 +120,16 @@ button:disabled { opacity: .5; cursor: default; }
 .amend { display: flex; gap: 6px; align-items: center; }
 .hook-error { border: 1px solid var(--danger); border-radius: 4px; padding: 6px 8px; }
 .hook-error pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--fg-muted); margin: 4px 0 0; max-height: 160px; overflow: auto; }
+
+/* Diff viewer (Monaco) */
+.diffview { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.diff-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.diff-head .file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.diff-head-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+.diff-head-actions button.icon { font-size: 18px; line-height: 1; color: var(--fg-muted); }
+.hunk-bar { display: flex; gap: 6px; padding: 4px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+.hunk-bar button { font-size: 11px; padding: 2px 8px; white-space: nowrap; }
+.diffview button:disabled { opacity: 0.5; cursor: default; }
+.diffview button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.diff-msg { padding: 16px; }
+.diff-editor { flex: 1; min-height: 0; }

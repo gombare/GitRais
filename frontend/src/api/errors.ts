@@ -15,6 +15,7 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   GitMissing: ['Git non trovato', 'Il git incluso nell’app non è disponibile: le operazioni sui repository sono disabilitate.', null],
   Timeout: ['Tempo scaduto', 'L’operazione ha impiegato troppo tempo ed è stata interrotta.', null],
   InvalidPath: ['Percorso non valido', 'Il percorso deve essere assoluto e non vuoto.', null],
+  InvalidFilePath: ['Percorso non valido', 'Il percorso del file non è valido o esce dal repository.', null],
   NoTab: ['Tab non trovata', 'La tab non esiste più.', null],
   OpInProgress: ['Operazione in corso', 'Un’altra operazione remota è già in esecuzione.', null],
   PullStrategyRequired: ['Strategia di pull richiesta', 'Le branch sono divergenti: scegli merge, rebase o solo fast-forward.', null],

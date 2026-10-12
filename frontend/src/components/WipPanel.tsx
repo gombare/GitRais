@@ -178,7 +178,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
       <li key={`${group}:${f.path}`} className={active ? 'selected' : ''}
         onContextMenu={group === 'unstaged' ? (e) => openMenu(e, [{ label: 'Scarta modifiche…', danger: true, onClick: () => discard(f) }]) : undefined}>
         <button className="file-row" aria-label={`Apri diff ${f.path}`} aria-current={active || undefined}
-          onClick={() => openDiff(tab, { kind: 'wip', path: f.path, staged: stagedList, untracked: f.untracked })}>
+          onClick={() => openDiff(tab, { kind: 'wip', path: f.path, staged: stagedList, untracked: f.untracked, ...(stagedList && f.origPath ? { oldPath: f.origPath } : {}) })}>
           <span className={`st st-${cls}`}>{letter}</span>
           <span className="file-path"><bdi>{f.origPath ? `${f.origPath} → ${f.path}` : f.path}</bdi></span>
         </button>
