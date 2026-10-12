@@ -36,6 +36,8 @@ type AppStore = {
 };
 
 let nextToast = 1;
+// Running runOp calls per tab: ops[tab] is cleared only when the last one settles.
+const activeOps = new Map<string, number>();
 
 export const useApp = create<AppStore>((set, get) => ({
   tabs: [],
@@ -134,14 +136,21 @@ export const useApp = create<AppStore>((set, get) => ({
     get().setOp(tab, op);
   },
   async runOp(tab, op, fn) {
-    get().setOp(tab, { op, phase: '', percent: 0 });
+    activeOps.set(tab, (activeOps.get(tab) ?? 0) + 1);
+    if (activeOps.get(tab) === 1) get().setOp(tab, { op, phase: '', percent: 0 });
     try {
       return await fn();
     } finally {
-      set((s) => {
-        const { [tab]: _done, ...ops } = s.ops;
-        return { ops };
-      });
+      // No `return` here: it would swallow fn's result or error.
+      const left = (activeOps.get(tab) ?? 1) - 1;
+      if (left > 0) activeOps.set(tab, left);
+      else {
+        activeOps.delete(tab);
+        set((s) => {
+          const { [tab]: _done, ...ops } = s.ops;
+          return { ops };
+        });
+      }
     }
   },
   pushAuth(p) {

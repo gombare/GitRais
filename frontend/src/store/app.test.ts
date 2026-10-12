@@ -96,6 +96,16 @@ describe('init', () => {
 });
 
 describe('runOp', () => {
+  it('a fast-failing overlapping op does not clear the running one', async () => {
+    useApp.setState({ tabs: [tab('a')] });
+    let release!: () => void;
+    const first = useApp.getState().runOp('a', 'pull', () => new Promise<void>((r) => { release = r; }));
+    await expect(useApp.getState().runOp('a', 'pull', async () => { throw new Error('busy'); })).rejects.toThrow('busy');
+    expect(useApp.getState().ops.a).toMatchObject({ op: 'pull' });
+    release();
+    await first;
+    expect(useApp.getState().ops.a).toBeUndefined();
+  });
   it('sets then clears ops on success and on error', async () => {
     useApp.setState({ tabs: [tab('a')] });
     let during: unknown;
