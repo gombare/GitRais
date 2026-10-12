@@ -305,6 +305,12 @@ func (a *App) LastCommitMessage(tab string) (string, error) {
 	return with(a, tab, func(s *session.Session) (string, error) { return s.LastCommitMessage(a.ctx) })
 }
 
+// RemoveIndexLock removes the tab's stale index.lock after the backend checks
+// that no process holds it. The frontend confirms with the user first.
+func (a *App) RemoveIndexLock(tab string) error {
+	return do(a, tab, func(s *session.Session) error { return s.RemoveIndexLock(a.ctx) })
+}
+
 func (a *App) Stage(tab string, paths []string) error {
 	return do(a, tab, func(s *session.Session) error { return s.Stage(a.ctx, paths) })
 }

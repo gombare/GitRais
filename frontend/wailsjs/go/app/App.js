@@ -118,6 +118,10 @@ export function Refs(arg1) {
   return window['go']['app']['App']['Refs'](arg1);
 }
 
+export function RemoveIndexLock(arg1) {
+  return window['go']['app']['App']['RemoveIndexLock'](arg1);
+}
+
 export function RenameBranch(arg1, arg2, arg3) {
   return window['go']['app']['App']['RenameBranch'](arg1, arg2, arg3);
 }

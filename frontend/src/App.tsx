@@ -6,6 +6,7 @@ import { Welcome } from './components/Welcome';
 import { Toasts } from './components/Toasts';
 import { RepoView } from './components/RepoView';
 import { DialogHost } from './components/Dialogs';
+import { AuthDialog } from './components/AuthDialog';
 import { ContextMenuHost } from './components/ContextMenu';
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
       {active === null && <Welcome />}
       <Toasts />
       <DialogHost />
+      <AuthDialog />
       <ContextMenuHost />
     </div>
   );

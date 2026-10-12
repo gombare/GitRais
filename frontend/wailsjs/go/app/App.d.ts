@@ -67,6 +67,8 @@ export function PushTag(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function Refs(arg1:string):Promise<gitread.Refs>;
 
+export function RemoveIndexLock(arg1:string):Promise<void>;
+
 export function RenameBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RestoreTabs():Promise<Array<app.TabInfo>>;

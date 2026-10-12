@@ -133,3 +133,16 @@ button:disabled { opacity: .5; cursor: default; }
 .diffview button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .diff-msg { padding: 16px; }
 .diff-editor { flex: 1; min-height: 0; }
+
+.toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
+.tb-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.tb-flex { flex: 1; }
+.tb-group { display: inline-flex; }
+.tb-group > button:first-child { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.tb-group > .tb-more { border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: none; padding: 4px 6px; }
+.tb-op { display: flex; gap: 8px; align-items: center; color: var(--accent); }
+.resizer { width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0; }
+.resizer:hover, .resizer:focus-visible { background: var(--accent); outline: none; }
+.modal-choices { display: flex; flex-direction: column; gap: 6px; }
+.auth-note { font-size: 12px; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
