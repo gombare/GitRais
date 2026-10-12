@@ -65,6 +65,7 @@ export function DialogHost() {
       }
     }
   };
+  const dangerConfirm = d.kind === 'confirm' && !!d.danger;
   const empty = d.kind === 'text' && !value.trim();
   return (
     <div className="modal-backdrop" onMouseDown={() => close(false)}>
@@ -77,8 +78,9 @@ export function DialogHost() {
           ? <label>{d.label}<input ref={input} autoFocus value={value} onChange={(e) => setValue(e.target.value)} /></label>
           : <p>{d.message}</p>}
         <div className="modal-actions">
-          <button type="button" onClick={() => close(false)}>Annulla</button>
-          <button type="submit" autoFocus={d.kind === 'confirm'} disabled={empty}
+          {/* Destructive confirms start on Cancel so a stray Enter cannot confirm. */}
+          <button type="button" autoFocus={dangerConfirm} onClick={() => close(false)}>Annulla</button>
+          <button type="submit" autoFocus={d.kind === 'confirm' && !dangerConfirm} disabled={empty}
             className={d.kind === 'confirm' && d.danger ? 'danger' : 'primary'}>OK</button>
         </div>
       </form>

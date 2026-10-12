@@ -72,6 +72,16 @@ func ReadRefs(ctx context.Context, r *gitexec.Runner, dir string) (Refs, error) 
 	if err != nil {
 		return Refs{}, err
 	}
+	remoteOut, err := run("remote")
+	if err != nil {
+		return Refs{}, err
+	}
+	var remotes []string
+	for _, n := range strings.Split(remoteOut, "\n") {
+		if n != "" {
+			remotes = append(remotes, n)
+		}
+	}
 	res.Refs = []Ref{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(line, "\x00")
@@ -88,13 +98,29 @@ func ReadRefs(ctx context.Context, r *gitexec.Runner, dir string) (Refs, error) 
 			ref.Kind, ref.Short = RefLocal, strings.TrimPrefix(f[0], "refs/heads/")
 		case strings.HasPrefix(f[0], "refs/remotes/"):
 			ref.Kind, ref.Short = RefRemote, strings.TrimPrefix(f[0], "refs/remotes/")
-			ref.Remote, _, _ = strings.Cut(ref.Short, "/")
+			ref.Remote = remoteOf(remotes, ref.Short)
 		case strings.HasPrefix(f[0], "refs/tags/"):
 			ref.Kind, ref.Short = RefTag, strings.TrimPrefix(f[0], "refs/tags/")
 		}
 		res.Refs = append(res.Refs, ref)
 	}
 	return res, nil
+}
+
+// remoteOf returns the longest configured remote name that prefixes short
+// (the ref path after refs/remotes/) followed by "/"; remote names may contain
+// "/". Falls back to the first path segment when no remote matches.
+func remoteOf(remotes []string, short string) string {
+	best := ""
+	for _, n := range remotes {
+		if len(n) > len(best) && strings.HasPrefix(short, n+"/") {
+			best = n
+		}
+	}
+	if best == "" {
+		best, _, _ = strings.Cut(short, "/")
+	}
+	return best
 }
 
 func parseTrack(s string) (ahead, behind int, gone bool) {

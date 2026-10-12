@@ -62,6 +62,31 @@ func TestReadRefs(t *testing.T) {
 	}
 }
 
+func TestReadRefsRemoteWithSlash(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	h := repo.CommitAll("base")
+	// "git remote add" refuses overlapping names, so write the config directly.
+	repo.Git("config", "remote.up.url", "/nonexistent/a")
+	repo.Git("config", "remote.up/stream.url", "/nonexistent/b")
+	repo.Git("update-ref", "refs/remotes/up/dev", h)
+	repo.Git("update-ref", "refs/remotes/up/stream/main", h)
+
+	refs, err := ReadRefs(context.Background(), repo.R, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Ref{}
+	for _, r := range refs.Refs {
+		by[r.Name] = r
+	}
+	if r := by["refs/remotes/up/dev"]; r.Remote != "up" || r.Short != "up/dev" {
+		t.Fatalf("up/dev = %+v", r)
+	}
+	if r := by["refs/remotes/up/stream/main"]; r.Remote != "up/stream" || r.Short != "up/stream/main" {
+		t.Fatalf("up/stream/main = %+v", r)
+	}
+}
+
 func TestReadRefsDetachedAndUnborn(t *testing.T) {
 	repo := testutil.NewRepo(t)
 	refs, err := ReadRefs(context.Background(), repo.R, repo.Dir)

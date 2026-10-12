@@ -27,6 +27,12 @@ describe('groupRefs', () => {
     expect(Object.keys(g.remotes)).toEqual(['origin']);
     expect(remoteBranchName(g.remotes.origin[0])).toBe('feat/a/b');
   });
+  it('derives the branch for a remote whose name contains "/"', () => {
+    const x = r('refs/remotes/up/stream/main', 'up/stream/main', 'remote', 'up/stream');
+    const g = groupRefs([x, r('refs/remotes/up/dev', 'up/dev', 'remote', 'up')], '');
+    expect(Object.keys(g.remotes).sort()).toEqual(['up', 'up/stream']);
+    expect(remoteBranchName(x)).toBe('main');
+  });
   it('excludes symbolic remote HEAD refs', () => {
     const g = groupRefs([
       r('refs/remotes/origin/HEAD', 'origin/HEAD', 'remote', 'origin'),

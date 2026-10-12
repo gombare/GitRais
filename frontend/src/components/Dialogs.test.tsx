@@ -11,12 +11,25 @@ describe('Dialogs', () => {
     const opener = screen.getByText('opener');
     opener.focus();
     let p!: Promise<boolean>;
-    act(() => { p = confirmAction({ title: 'T', message: 'M', danger: true }); });
+    act(() => { p = confirmAction({ title: 'T', message: 'M' }); });
     const ok = screen.getByRole('button', { name: 'OK' });
     expect(document.activeElement).toBe(ok);
     await act(async () => { fireEvent.click(ok); });
     await expect(p).resolves.toBe(true);
     expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+  it('danger confirm: initial focus is Cancel, which cancels; OK stays reachable', async () => {
+    render(<><button>opener</button><DialogHost /></>);
+    const opener = screen.getByText('opener');
+    opener.focus();
+    let p!: Promise<boolean>;
+    act(() => { p = confirmAction({ title: 'T', message: 'M', danger: true }); });
+    const cancel = screen.getByRole('button', { name: 'Annulla' });
+    expect(document.activeElement).toBe(cancel);
+    expect(screen.getByRole('button', { name: 'OK' }).className).toBe('danger');
+    await act(async () => { fireEvent.click(cancel); }); // Enter on a focused button fires click
+    await expect(p).resolves.toBe(false);
     expect(document.activeElement).toBe(opener);
   });
   it('confirm: Escape cancels', async () => {
