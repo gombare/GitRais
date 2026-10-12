@@ -19,6 +19,9 @@ var (
 	// ErrHunkOutOfRange is returned by StageLines when the diff changed since the
 	// frontend read it.
 	ErrHunkOutOfRange = errors.New("invalid hunk: the file changed, reload the diff")
+	// ErrLineOutOfRange is returned by StageLines for a line index outside the
+	// selected hunk.
+	ErrLineOutOfRange = errors.New("invalid line index")
 	// ErrNoLinesSelected is returned by StageLines when the selection holds no
 	// added or removed line.
 	ErrNoLinesSelected = errors.New("no changed lines selected")
@@ -81,7 +84,7 @@ func (s *Session) StageLines(ctx context.Context, req StageLinesRequest) error {
 			sel = diff.Selection{req.Hunk: {}}
 			for _, l := range req.Lines {
 				if l < 0 || l >= len(fd.Hunks[req.Hunk].Lines) {
-					return ErrHunkOutOfRange
+					return ErrLineOutOfRange
 				}
 				sel[req.Hunk][l] = true
 			}
@@ -186,6 +189,9 @@ func (s *Session) Pull(mode ops.PullMode) error {
 // PushCurrent pushes the current branch to its upstream or, when it has none,
 // to origin (or the first remote), setting the upstream.
 func (s *Session) PushCurrent(force bool) error {
+	if s.ctx.Err() != nil {
+		return ErrClosed
+	}
 	o, err := s.pushTarget(s.ctx, force)
 	if err != nil {
 		return err

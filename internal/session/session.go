@@ -66,6 +66,14 @@ var (
 	ErrInvalidHash = errors.New("invalid commit hash")
 )
 
+// Test seams. Tests set them before Open and restore them after Close.
+var (
+	readStashes = gitread.ReadStashes
+	// beforeGraphProgress, when set, runs in the graph loader of generation gen
+	// right before it tries to publish a progress or done event.
+	beforeGraphProgress func(gen uint64)
+)
+
 // watchDebounce coalesces bursts of file events into one notification.
 const watchDebounce = 300 * time.Millisecond
 
@@ -99,11 +107,12 @@ type Session struct {
 
 	idx atomic.Pointer[graph.Index]
 
-	loadMu     sync.Mutex // guards loadGen, loadCancel, loadClosed and loadWG.Add
+	loadMu     sync.Mutex // guards loadGen, loadCancel, loadClosed, loadWG.Add and writeWG.Add
 	loadGen    uint64
 	loadCancel context.CancelFunc
-	loadClosed bool
+	loadClosed bool // set by Close: no new loader or write starts
 	loadWG     sync.WaitGroup
+	writeWG    sync.WaitGroup // in-flight writes (local and remote)
 
 	writeSem chan struct{} // capacity 1: the per-repository write lock
 
@@ -185,16 +194,16 @@ func revParse(ctx context.Context, r *gitexec.Runner, dir string, flags ...strin
 	return filepath.EvalSymlinks(strings.TrimSpace(string(out)))
 }
 
-// Close stops the watchers, cancels the graph load and any remote operation,
-// and waits for background work. After it returns no event is emitted. It is
-// idempotent and must not be called from the Emitter.
+// Close stops the watchers, cancels the graph load and every running write
+// (local or remote), and waits for them. After it returns no event is emitted
+// and no write runs. It is idempotent and must not be called from the Emitter.
 func (s *Session) Close() {
 	s.once.Do(func() {
 		s.emitMu.Lock()
 		s.closed = true
 		s.emitMu.Unlock()
 
-		s.cancel() // also cancels remote ops and closes the ignore filter
+		s.cancel() // also cancels writes, remote ops and the ignore filter
 
 		s.loadMu.Lock()
 		s.loadClosed = true
@@ -203,9 +212,12 @@ func (s *Session) Close() {
 		}
 		s.loadMu.Unlock()
 
+		// Watchers first: a cancelled write's resume then skips the flush
+		// barrier. Writes take no lock Close holds, so waiting cannot deadlock.
 		for _, w := range s.watchers {
 			w.Close()
 		}
+		s.writeWG.Wait()
 		s.loadWG.Wait()
 	})
 }
@@ -262,46 +274,51 @@ func (s *Session) Reload() {
 		defer cancel()
 		idx := graph.NewIndex()
 		swapped := false
-		// swap installs idx unless a newer Reload superseded this one; the check
-		// and the store happen under loadMu so a stale loader never wins.
-		swap := func() bool {
-			if swapped {
-				return true
+		// publish installs idx on its first call and emits gp (if any), unless a
+		// newer Reload or Close superseded this loader. The check, the store and
+		// the emits all happen under loadMu, so once a newer generation exists
+		// (it is created under loadMu, before its graph:reset) nothing from this
+		// one is emitted. Lock order: loadMu, then emitMu; Close never takes them
+		// nested and the Emitter must not call back into the Session.
+		publish := func(gp *GraphProgress) bool {
+			if gp != nil && beforeGraphProgress != nil {
+				beforeGraphProgress(gen)
 			}
 			s.loadMu.Lock()
-			ok := gen == s.loadGen && ctx.Err() == nil
-			if ok {
-				s.idx.Store(idx)
+			defer s.loadMu.Unlock()
+			if gen != s.loadGen || s.loadClosed || ctx.Err() != nil {
+				return false
 			}
-			s.loadMu.Unlock()
-			if ok {
+			if !swapped {
 				swapped = true
+				s.idx.Store(idx)
 				s.emit(EventGraphReset, TabEvent{s.ID})
 			}
-			return ok
+			if gp != nil {
+				s.emit(EventGraphProgress, *gp)
+			}
+			return true
 		}
 		if s.idx.Load() == nil {
-			swap() // first load: show rows as they arrive
+			publish(nil) // first load: show rows as they arrive
 		}
-		stashes, err := gitread.ReadStashes(ctx, s.r, s.Dir)
-		if err == nil {
-			err = graph.Load(ctx, s.r, s.Dir, idx, graph.LoadOptions{
-				Stashes: stashes,
-				OnProgress: func(n int) {
-					if swap() {
-						s.emit(EventGraphProgress, GraphProgress{Tab: s.ID, Rows: n})
-					}
-				},
-			})
-		}
-		if ctx.Err() != nil || !swap() {
+		// Without stashes the graph is still useful: a failed stash read only
+		// leaves the stash rows out.
+		stashes, _ := readStashes(ctx, s.r, s.Dir)
+		err := graph.Load(ctx, s.r, s.Dir, idx, graph.LoadOptions{
+			Stashes: stashes,
+			OnProgress: func(n int) {
+				publish(&GraphProgress{Tab: s.ID, Rows: n})
+			},
+		})
+		if ctx.Err() != nil {
 			return
 		}
 		gp := GraphProgress{Tab: s.ID, Rows: idx.Len(), Done: true}
 		if err != nil {
 			gp.Error = err.Error()
 		}
-		s.emit(EventGraphProgress, gp)
+		publish(&gp)
 	}()
 }
 
@@ -411,6 +428,9 @@ func (s *Session) lock(ctx context.Context) error {
 	case s.writeSem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
+		if s.ctx.Err() != nil {
+			return ErrClosed
+		}
 		return ctx.Err()
 	case <-s.ctx.Done():
 		return ErrClosed
@@ -422,8 +442,23 @@ func (s *Session) unlock() { <-s.writeSem }
 // write serializes a write, suspends the watchers (dropping the events the write
 // itself causes) and notifies the frontend when it is over, even on error.
 // refs says whether refs/HEAD may have moved (graph reload) or only the
-// working tree and index changed. Errors from fn are returned unchanged.
+// working tree and index changed. Errors from fn are returned unchanged. fn runs
+// under a context cancelled by ctx or by Close, which waits for it.
 func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context) error) error {
+	s.loadMu.Lock()
+	if s.loadClosed {
+		s.loadMu.Unlock()
+		return ErrClosed
+	}
+	s.writeWG.Add(1)
+	s.loadMu.Unlock()
+	defer s.writeWG.Done()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+
 	if err := s.lock(ctx); err != nil {
 		return err
 	}

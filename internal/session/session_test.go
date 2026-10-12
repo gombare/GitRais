@@ -3,12 +3,15 @@ package session
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"gitrais/internal/gitexec"
+	"gitrais/internal/gitread"
+	"gitrais/internal/graph"
 	"gitrais/internal/ops"
 	"gitrais/internal/testutil"
 )
@@ -36,6 +39,17 @@ func (r *recorder) emit(ev string, d any) {
 func (r *recorder) count(ev string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	n := 0
+	for _, e := range r.events {
+		if e == ev {
+			n++
+		}
+	}
+	return n
+}
+
+// count2 is count for callers already holding r.mu.
+func (r *recorder) count2(ev string) int {
 	n := 0
 	for _, e := range r.events {
 		if e == ev {
@@ -167,6 +181,9 @@ func TestStageLines(t *testing.T) {
 	}
 	if err := s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 7}); !errors.Is(err, ErrHunkOutOfRange) {
 		t.Fatalf("out-of-range hunk: err = %v", err)
+	}
+	if err := s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 0, Lines: []int{99}}); !errors.Is(err, ErrLineOutOfRange) {
+		t.Fatalf("out-of-range line: err = %v", err)
 	}
 	repo.Write("new.txt", "x\n")
 	repo.Git("add", "new.txt")
@@ -470,24 +487,160 @@ func TestRemoteOpExclusiveAndCancel(t *testing.T) {
 }
 
 func TestOpProgressEmitted(t *testing.T) {
-	repo := testutil.NewRepo(t)
-	repo.Write("big.bin", string(make([]byte, 64<<10)))
+	// GIT_PROGRESS_DELAY=0 makes git report delayed progress meters at once, so
+	// even a tiny local push and fetch produce progress lines.
+	r := testutil.Runner(t)
+	r.Env = append(r.Env, "GIT_PROGRESS_DELAY=0")
+	repo := testutil.NewRepoWith(t, r)
+	repo.Write("a.txt", "a\n")
+	repo.Write("b.txt", "b\n")
 	repo.CommitAll("one")
-	repo.Git("remote", "add", "origin", testutil.NewBare(t, repo.R))
+	bare := testutil.NewBare(t, r)
+	repo.Git("remote", "add", "origin", bare)
 	s, rec := open(t, repo)
 	if err := s.PushCurrent(false); err != nil {
 		t.Fatal(err)
 	}
-	// git only reports progress after a delay, so progress events are not
-	// guaranteed on a tiny push; when present they must be well-formed.
+	// A second clone pushes new objects, which the session then fetches.
+	other := testutil.NewRepoWith(t, r)
+	other.Git("pull", "-q", bare, "main")
+	other.Write("c.txt", "c\n")
+	other.CommitAll("two")
+	other.Git("push", "-q", bare, "main")
+	if err := s.Fetch(); err != nil {
+		t.Fatal(err)
+	}
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
+	got := map[string]int{}
 	for i, e := range rec.events {
 		if e == "op:progress" {
-			if p := rec.data[i].(OpProgress); p.Tab != "t1" || p.Op != "push" {
+			p := rec.data[i].(OpProgress)
+			if p.Tab != "t1" || p.Phase == "" || p.Total <= 0 {
 				t.Fatalf("op:progress = %+v", p)
 			}
+			got[p.Op]++
 		}
+	}
+	if got["push"] == 0 || got["fetch"] == 0 {
+		t.Fatalf("op:progress per op = %v, want push and fetch progress", got)
+	}
+}
+
+// A superseded graph loader must not emit anything after the newer loader's
+// graph:reset, even when it was already past the swap.
+func TestStaleLoaderEventsDropped(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	beforeGraphProgress = func(gen uint64) {
+		if gen == 1 {
+			once.Do(func() { close(reached); <-release })
+		}
+	}
+	rec := newRecorder()
+	s, err := Open("t1", repo.Dir, repo.R, rec.emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close(); beforeGraphProgress = nil })
+	<-reached // generation 1 is installed and about to publish its progress
+	s.Reload()
+	rec.waitFor(t, "graph:progress", graphDone(1))
+	close(release)
+	s.loadWG.Wait() // generation 1 finished: anything it emitted is recorded
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	last := -1
+	for i, e := range rec.events {
+		if e == "graph:reset" {
+			last = i
+		}
+	}
+	if rec.count2("graph:reset") != 2 {
+		t.Fatalf("events = %v, want two graph:reset", rec.events)
+	}
+	// Only generation 2's progress and done may follow its reset.
+	if after := rec.events[last+1:]; len(after) != 2 {
+		t.Fatalf("events after the last graph:reset = %v", after)
+	}
+}
+
+// A stash read failure must not blank the graph: it loads without stash rows.
+func TestStashReadFailureStillLoadsGraph(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	repo.CommitAll("two")
+	readStashes = func(context.Context, *gitexec.Runner, string) ([]graph.Stash, error) {
+		return nil, errors.New("stash list failed")
+	}
+	t.Cleanup(func() { readStashes = gitread.ReadStashes })
+	s, rec := open(t, repo)
+	rec.waitFor(t, "graph:progress", graphDone(2))
+	if n, done := s.GraphInfo(); n != 2 || !done {
+		t.Fatalf("GraphInfo = %d, %v", n, done)
+	}
+}
+
+// Close cancels a running local write and waits for it.
+func TestCloseCancelsRunningWrite(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	hooks := filepath.Join(repo.Dir, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "started")
+	hook := "#!/bin/sh\ntouch '" + marker + "'\nsleep 30\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, _ := open(t, repo)
+	repo.Write("x.txt", "x\n")
+	repo.Git("add", "x.txt")
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.CommitChanges(bg, ops.CommitOptions{Message: "x"})
+		errc <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pre-commit hook did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	start := time.Now()
+	s.Close()
+	if d := time.Since(start); d > 4*time.Second {
+		t.Fatalf("Close took %v", d)
+	}
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("write cancelled by Close returned nil")
+		}
+	case <-time.After(2 * time.Second): // only the return path is left, not the 30s hook
+		t.Fatal("write still running after Close returned")
+	}
+	if n := repo.Git("rev-list", "--count", "HEAD"); n != "1" {
+		t.Fatalf("commits = %s, the cancelled commit landed", n)
+	}
+}
+
+func TestPushCurrentAfterClose(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	repo.Git("remote", "add", "origin", testutil.NewBare(t, repo.R))
+	s, _ := open(t, repo)
+	s.Close()
+	if err := s.PushCurrent(false); !errors.Is(err, ErrClosed) {
+		t.Fatalf("PushCurrent after Close: err = %v", err)
 	}
 }
 
