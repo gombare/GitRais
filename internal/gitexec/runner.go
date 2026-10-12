@@ -34,7 +34,7 @@ const maxStderr = 64 << 10
 // maxRecord is the maximum size of a Stream record (a variable so tests can override it).
 var maxRecord = 16 << 20
 
-func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
+func (r *Runner) command(ctx context.Context, c Cmd) (*exec.Cmd, func()) {
 	cmd := exec.CommandContext(ctx, r.Git, c.Args...)
 	cmd.Dir = c.Dir
 	env := append(inheritedEnv(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
@@ -47,9 +47,9 @@ func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
 	default:
 		cmd.Stdin = &ctxReader{ctx: ctx, r: in}
 	}
-	setProcessGroup(cmd)
+	release := setProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
-	return cmd
+	return cmd, release
 }
 
 // redirectEnv lists the variables that would redirect git to another repository.
@@ -77,7 +77,8 @@ envLoop:
 func (r *Runner) Run(ctx context.Context, c Cmd) ([]byte, error) {
 	var stdout bytes.Buffer
 	tail := &tailWriter{on: c.OnStderr}
-	cmd := r.command(ctx, c)
+	cmd, release := r.command(ctx, c)
+	defer release()
 	cmd.Stdout = &stdout
 	cmd.Stderr = tail
 	start := time.Now()
@@ -89,7 +90,8 @@ func (r *Runner) Stream(ctx context.Context, c Cmd, delim byte, onRecord func([]
 	ctx2, cancel := context.WithCancel(ctx)
 	defer cancel()
 	tail := &tailWriter{on: c.OnStderr}
-	cmd := r.command(ctx2, c)
+	cmd, release := r.command(ctx2, c)
+	defer release()
 	cmd.Stderr = tail
 	out, err := cmd.StdoutPipe()
 	if err != nil {
