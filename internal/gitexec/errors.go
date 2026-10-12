@@ -33,7 +33,7 @@ func newGitError(args []string, exit int, stderr string, err error) *GitError {
 	for i, a := range args {
 		red[i] = RedactURL(a)
 	}
-	return &GitError{Args: red, ExitCode: exit, Stderr: stderr, Kind: Classify(stderr), err: err}
+	return &GitError{Args: red, ExitCode: exit, Stderr: RedactURL(stderr), Kind: Classify(stderr), err: err}
 }
 
 func (e *GitError) Error() string {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -31,18 +32,47 @@ var ReadOnlyEnv = []string{"GIT_OPTIONAL_LOCKS=0"}
 
 const maxStderr = 64 << 10
 
+// maxRecord è la dimensione massima di un record di Stream (variabile per i test).
+var maxRecord = 16 << 20
+
 func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, r.Git, c.Args...)
 	cmd.Dir = c.Dir
-	env := append(os.Environ(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
+	env := append(inheritedEnv(), "LC_ALL=C", "GIT_TERMINAL_PROMPT=0")
 	env = append(env, r.Env...)
 	cmd.Env = append(env, c.Env...)
-	if c.Stdin != nil {
-		cmd.Stdin = &ctxReader{ctx: ctx, r: c.Stdin}
+	switch in := c.Stdin.(type) {
+	case nil:
+	case *os.File:
+		cmd.Stdin = in // exec passa il file direttamente al processo: nessuna goroutine di copia
+	default:
+		cmd.Stdin = &ctxReader{ctx: ctx, r: in}
 	}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = 5 * time.Second
 	return cmd
+}
+
+// redirectEnv elenca le variabili che reindirizzerebbero git su un altro repository.
+var redirectEnv = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
+}
+
+// inheritedEnv ritorna os.Environ() senza le variabili di redirectEnv, così una shell o un hook
+// genitore non può far operare i comandi su un repository diverso da Cmd.Dir.
+func inheritedEnv() []string {
+	var out []string
+envLoop:
+	for _, kv := range os.Environ() {
+		for _, k := range redirectEnv {
+			if strings.HasPrefix(kv, k+"=") {
+				continue envLoop
+			}
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 func (r *Runner) Run(ctx context.Context, c Cmd) ([]byte, error) {
@@ -71,7 +101,7 @@ func (r *Runner) Stream(ctx context.Context, c Cmd, delim byte, onRecord func([]
 		return err
 	}
 	sc := bufio.NewScanner(out)
-	sc.Buffer(make([]byte, 64<<10), 16<<20)
+	sc.Buffer(make([]byte, 64<<10), maxRecord)
 	sc.Split(splitOn(delim))
 	var cbErr error
 	for sc.Scan() {
@@ -81,6 +111,9 @@ func (r *Runner) Stream(ctx context.Context, c Cmd, delim byte, onRecord func([]
 		}
 	}
 	scanErr := sc.Err()
+	if scanErr != nil {
+		cancel() // nessuno drena più stdout: senza cancel git resterebbe bloccato sulla pipe piena
+	}
 	waitErr := cmd.Wait()
 	if cbErr != nil {
 		return cbErr
@@ -145,6 +178,8 @@ func (w *tailWriter) String() string { return string(w.buf) }
 // che copia stdin, e una Read bloccata su un reader non-file (es. io.Pipe) non verrebbe
 // mai sbloccata dalla cancellazione del context. La goroutine di lettura sottostante può
 // restare in sospeso finché il reader non ritorna, ma non blocca più Run/Stream.
+// Attenzione: dopo la cancellazione una Read rimasta in sospeso può ancora consumare e
+// scartare dati del chiamante. Gli *os.File non passano da qui (vedi command).
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader

@@ -3,9 +3,9 @@ package gitexec
 import (
 	"encoding/json"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -59,15 +59,15 @@ func (l *ActivityLog) Close() error {
 	return l.c.Close()
 }
 
-// RedactURL rimuove user:password da un argomento che contiene un URL.
+var userinfoRe = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^\s]+@`)
+
+// RedactURL rimuove la userinfo (user:password@) da ogni URL con schema presente nella stringa,
+// anche se incorporato in un argomento più grande (--repo=URL) o in un messaggio di errore.
+// Il match è volutamente avido (fino all'ultima @ prima di uno spazio) così password con
+// '/', '#', '@' o '%' non lasciano residui. Le forme scp-like (git@host:path) non cambiano.
 func RedactURL(s string) string {
-	if !strings.Contains(s, "://") || !strings.Contains(s, "@") {
+	if !strings.Contains(s, "://") {
 		return s
 	}
-	u, err := url.Parse(s)
-	if err != nil || u.User == nil {
-		return s
-	}
-	u.User = nil
-	return u.String()
+	return userinfoRe.ReplaceAllString(s, "$1")
 }

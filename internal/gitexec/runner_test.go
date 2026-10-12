@@ -112,3 +112,37 @@ func TestStreamCallbackErrorStops(t *testing.T) {
 		t.Fatalf("want stop, got %v", err)
 	}
 }
+
+func TestStreamScannerErrorDoesNotHang(t *testing.T) {
+	gitexec.SetMaxRecordForTest(t, 1024)
+	repo := testutil.NewRepo(t)
+	repo.Write("big.txt", strings.Repeat("x", 1<<20)) // 1 MiB senza newline, oltre il buffer della pipe
+	repo.CommitAll("big")
+	done := make(chan error, 1)
+	go func() {
+		done <- repo.R.Stream(context.Background(), gitexec.Cmd{Dir: repo.Dir, Args: []string{"cat-file", "-p", "HEAD:big.txt"}}, '\n',
+			func([]byte) error { return nil })
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("want scanner error, got nil")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stream hung after scanner error")
+	}
+}
+
+func TestRunIgnoresInheritedGitDir(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	t.Setenv("GIT_DIR", "/nonexistent")
+	t.Setenv("GIT_WORK_TREE", "/nonexistent")
+	t.Setenv("GIT_INDEX_FILE", "/nonexistent/index")
+	out, err := repo.R.Run(context.Background(), gitexec.Cmd{Dir: repo.Dir, Args: []string{"rev-parse", "--show-toplevel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		t.Fatal("empty toplevel")
+	}
+}

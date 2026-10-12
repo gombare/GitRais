@@ -1,6 +1,9 @@
 package gitexec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClassify(t *testing.T) {
 	cases := []struct {
@@ -36,5 +39,12 @@ func TestGitErrorMessage(t *testing.T) {
 	}
 	if got := e.Error(); got != "git push: exit 1: error: boom" {
 		t.Fatalf("Error() = %q", got)
+	}
+}
+
+func TestNewGitErrorRedactsStderr(t *testing.T) {
+	e := newGitError([]string{"fetch"}, 128, "fatal: unable to access 'https://u:secret@h/r/': boom\n", nil)
+	if strings.Contains(e.Stderr, "secret") || strings.Contains(e.Error(), "secret") {
+		t.Fatalf("credentials leaked: %q", e.Stderr)
 	}
 }
