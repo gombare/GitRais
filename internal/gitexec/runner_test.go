@@ -116,7 +116,7 @@ func TestStreamCallbackErrorStops(t *testing.T) {
 func TestStreamScannerErrorDoesNotHang(t *testing.T) {
 	gitexec.SetMaxRecordForTest(t, 1024)
 	repo := testutil.NewRepo(t)
-	repo.Write("big.txt", strings.Repeat("x", 1<<20)) // 1 MiB senza newline, oltre il buffer della pipe
+	repo.Write("big.txt", strings.Repeat("x", 1<<20)) // 1 MiB with no newline, larger than the pipe buffer
 	repo.CommitAll("big")
 	done := make(chan error, 1)
 	go func() {

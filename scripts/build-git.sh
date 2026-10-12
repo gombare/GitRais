@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compila git da sorgente in una installazione rilocabile (RUNTIME_PREFIX).
+# Builds git from source into a relocatable installation (RUNTIME_PREFIX).
 set -euo pipefail
 VERSION="$1"; DEST="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 SRC="build/git-src"

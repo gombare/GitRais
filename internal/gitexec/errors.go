@@ -50,7 +50,7 @@ func (e *GitError) Error() string {
 
 func (e *GitError) Unwrap() error { return e.err }
 
-// Le regole sono valutate in ordine: le più specifiche prima.
+// Rules are evaluated in order: the most specific first.
 var rules = []struct {
 	kind     Kind
 	patterns []string

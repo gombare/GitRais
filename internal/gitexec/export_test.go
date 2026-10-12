@@ -2,7 +2,7 @@ package gitexec
 
 import "testing"
 
-// SetMaxRecordForTest riduce il limite di dimensione dei record di Stream per la durata del test.
+// SetMaxRecordForTest lowers the Stream record size limit for the duration of the test.
 func SetMaxRecordForTest(t testing.TB, n int) {
 	old := maxRecord
 	maxRecord = n

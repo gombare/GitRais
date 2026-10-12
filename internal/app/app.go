@@ -1,4 +1,4 @@
-// Package app è l'unico punto di contatto tra Wails e il backend.
+// Package app is the single point of contact between Wails and the backend.
 package app
 
 import "context"

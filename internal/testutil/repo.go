@@ -1,4 +1,4 @@
-// Package testutil crea repository git temporanei isolati per i test.
+// Package testutil creates isolated temporary git repositories for tests.
 package testutil
 
 import (
@@ -11,7 +11,7 @@ import (
 	"gitrais/internal/gitexec"
 )
 
-// IsolatedEnv rende i test indipendenti dalla configurazione dell'utente e di sistema.
+// IsolatedEnv makes tests independent of the user's and system's git configuration.
 func IsolatedEnv(home string) []string {
 	return []string{
 		"HOME=" + home,
@@ -28,7 +28,7 @@ func Runner(t testing.TB) *gitexec.Runner {
 	t.Helper()
 	git, err := gitexec.Locate()
 	if err != nil {
-		t.Fatalf("git incluso non trovato (esegui `make git`): %v", err)
+		t.Fatalf("bundled git not found (run `make git`): %v", err)
 	}
 	return &gitexec.Runner{Git: git, Env: IsolatedEnv(realTemp(t))}
 }
@@ -48,7 +48,7 @@ func NewRepoWith(t testing.TB, r *gitexec.Runner) *Repo {
 	return repo
 }
 
-// NewBare crea un repository bare da usare come remote locale.
+// NewBare creates a bare repository to use as a local remote.
 func NewBare(t testing.TB, r *gitexec.Runner) string {
 	t.Helper()
 	dir := filepath.Join(realTemp(t), "remote.git")
@@ -87,8 +87,8 @@ func (r *Repo) CommitAll(msg string) string {
 	return r.Git("rev-parse", "HEAD")
 }
 
-// realTemp restituisce una directory temporanea senza symlink (/var → /private/var),
-// necessario perché FSEvents riporta path reali.
+// realTemp returns a temporary directory without symlinks (/var → /private/var),
+// needed because FSEvents reports real paths.
 func realTemp(t testing.TB) string {
 	t.Helper()
 	d, err := filepath.EvalSymlinks(t.TempDir())

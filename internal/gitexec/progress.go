@@ -26,7 +26,7 @@ func ParseProgressLine(line string) (Progress, bool) {
 	return Progress{Phase: m[1], Percent: pct, Current: cur, Total: tot}, true
 }
 
-// ProgressParser riceve lo stderr di git (righe separate da \r o \n) e chiama On per ogni riga di avanzamento.
+// ProgressParser receives git's stderr (lines separated by \r or \n) and calls On for each progress line.
 type ProgressParser struct {
 	On  func(Progress)
 	buf []byte

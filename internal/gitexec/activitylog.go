@@ -61,10 +61,10 @@ func (l *ActivityLog) Close() error {
 
 var userinfoRe = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^\s]+@`)
 
-// RedactURL rimuove la userinfo (user:password@) da ogni URL con schema presente nella stringa,
-// anche se incorporato in un argomento più grande (--repo=URL) o in un messaggio di errore.
-// Il match è volutamente avido (fino all'ultima @ prima di uno spazio) così password con
-// '/', '#', '@' o '%' non lasciano residui. Le forme scp-like (git@host:path) non cambiano.
+// RedactURL removes the userinfo (user:password@) from every URL with a scheme present in the
+// string, even when it is embedded in a larger argument (--repo=URL) or in an error message.
+// The match is intentionally greedy (up to the last @ before a space), so passwords containing
+// '/', '#', '@' or '%' leave no residue. scp-like forms (git@host:path) are unchanged.
 func RedactURL(s string) string {
 	if !strings.Contains(s, "://") {
 		return s

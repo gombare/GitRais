@@ -1,4 +1,4 @@
-// Package gitexec esegue il binario git incluso e ne interpreta l'output.
+// Package gitexec runs the bundled git binary and parses its output.
 package gitexec
 
 import (
@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 )
 
-// Locate restituisce il path del git incluso.
+// Locate returns the path of the bundled git.
 func Locate() (string, error) {
 	return locate("GITRAIS_GIT",
 		filepath.Join("..", "Resources", "git", "bin", "git"),
 		filepath.Join("build", "git-dist", "bin", "git"))
 }
 
-// LocateHelper restituisce il path di askpass-helper.
+// LocateHelper returns the path of askpass-helper.
 func LocateHelper() (string, error) {
 	return locate("GITRAIS_ASKPASS_HELPER",
 		filepath.Join("..", "Resources", "askpass-helper"),
@@ -26,7 +26,7 @@ func locate(envKey, bundleRel, devRel string) (string, error) {
 		if isExecutable(p) {
 			return p, nil
 		}
-		return "", fmt.Errorf("%s=%q non è un eseguibile", envKey, p)
+		return "", fmt.Errorf("%s=%q is not an executable", envKey, p)
 	}
 	exe, err := os.Executable()
 	if err == nil {
@@ -43,7 +43,7 @@ func locate(envKey, bundleRel, devRel string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("%s non trovato: esegui `make git`/`make helper` o imposta %s", devRel, envKey)
+	return "", fmt.Errorf("%s not found: run `make git`/`make helper` or set %s", devRel, envKey)
 }
 
 func findUp(start, rel string) (string, bool) {

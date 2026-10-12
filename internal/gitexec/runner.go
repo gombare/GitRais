@@ -27,12 +27,12 @@ type Runner struct {
 	Log *ActivityLog
 }
 
-// ReadOnlyEnv evita che i comandi di sola lettura (status, diff) prendano lock opzionali sull'index.
+// ReadOnlyEnv prevents read-only commands (status, diff) from taking optional locks on the index.
 var ReadOnlyEnv = []string{"GIT_OPTIONAL_LOCKS=0"}
 
 const maxStderr = 64 << 10
 
-// maxRecord è la dimensione massima di un record di Stream (variabile per i test).
+// maxRecord is the maximum size of a Stream record (a variable so tests can override it).
 var maxRecord = 16 << 20
 
 func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
@@ -44,7 +44,7 @@ func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
 	switch in := c.Stdin.(type) {
 	case nil:
 	case *os.File:
-		cmd.Stdin = in // exec passa il file direttamente al processo: nessuna goroutine di copia
+		cmd.Stdin = in // exec passes the file directly to the process: no copy goroutine
 	default:
 		cmd.Stdin = &ctxReader{ctx: ctx, r: in}
 	}
@@ -53,14 +53,14 @@ func (r *Runner) command(ctx context.Context, c Cmd) *exec.Cmd {
 	return cmd
 }
 
-// redirectEnv elenca le variabili che reindirizzerebbero git su un altro repository.
+// redirectEnv lists the variables that would redirect git to another repository.
 var redirectEnv = []string{
 	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
 }
 
-// inheritedEnv ritorna os.Environ() senza le variabili di redirectEnv, così una shell o un hook
-// genitore non può far operare i comandi su un repository diverso da Cmd.Dir.
+// inheritedEnv returns os.Environ() without the redirectEnv variables, so a parent shell or hook
+// cannot make commands operate on a repository other than Cmd.Dir.
 func inheritedEnv() []string {
 	var out []string
 envLoop:
@@ -112,7 +112,7 @@ func (r *Runner) Stream(ctx context.Context, c Cmd, delim byte, onRecord func([]
 	}
 	scanErr := sc.Err()
 	if scanErr != nil {
-		cancel() // nessuno drena più stdout: senza cancel git resterebbe bloccato sulla pipe piena
+		cancel() // nothing drains stdout anymore: without cancel, git would stay blocked on the full pipe
 	}
 	waitErr := cmd.Wait()
 	if cbErr != nil {
@@ -155,7 +155,7 @@ func splitOn(delim byte) bufio.SplitFunc {
 	}
 }
 
-// tailWriter conserva gli ultimi maxStderr byte e inoltra ogni chunk a on.
+// tailWriter keeps the last maxStderr bytes and forwards each chunk to on.
 type tailWriter struct {
 	buf []byte
 	on  func([]byte)
@@ -174,12 +174,11 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 
 func (w *tailWriter) String() string { return string(w.buf) }
 
-// ctxReader rende interrompibile la lettura di stdin: exec.Cmd.Wait aspetta la goroutine
-// che copia stdin, e una Read bloccata su un reader non-file (es. io.Pipe) non verrebbe
-// mai sbloccata dalla cancellazione del context. La goroutine di lettura sottostante può
-// restare in sospeso finché il reader non ritorna, ma non blocca più Run/Stream.
-// Attenzione: dopo la cancellazione una Read rimasta in sospeso può ancora consumare e
-// scartare dati del chiamante. Gli *os.File non passano da qui (vedi command).
+// ctxReader makes reading stdin interruptible: exec.Cmd.Wait waits for the goroutine copying
+// stdin, and a Read blocked on a non-file reader (e.g. io.Pipe) would never be unblocked by
+// context cancellation. The underlying read goroutine may stay pending until the reader
+// returns, but it no longer blocks Run/Stream. Warning: after cancellation, a pending Read may
+// still consume and discard data from the caller. *os.File values do not go through here (see command).
 type ctxReader struct {
 	ctx context.Context
 	r   io.Reader
