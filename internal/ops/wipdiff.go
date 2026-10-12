@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
@@ -16,9 +17,10 @@ type WipDiffRequest struct {
 }
 
 // diffBase pins the path prefixes so user config (diff.noprefix,
-// diff.mnemonicPrefix) can't change what diff.Parse and BuildPatch expect.
+// diff.mnemonicPrefix) can't change what diff.Parse and BuildPatch expect, and
+// disables textconv so hunks carry the real bytes (needed to build patches).
 var diffBase = []string{
-	"-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "-M",
+	"-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M",
 	"--src-prefix=a/", "--dst-prefix=b/",
 }
 
@@ -65,7 +67,12 @@ func single(out []byte, path string) (diff.FileDiff, error) {
 	}
 	switch len(files) {
 	case 0:
-		return diff.FileDiff{NewPath: path, OldPath: path, Status: "M", Hunks: []diff.Hunk{}}, nil
+		// "git diff --cached" prints only "* Unmerged path <p>" for conflicts.
+		status := "M"
+		if bytes.Contains(out, []byte("* Unmerged path ")) {
+			status = "U"
+		}
+		return diff.FileDiff{NewPath: path, OldPath: path, Status: status, Hunks: []diff.Hunk{}}, nil
 	case 1:
 		return files[0], nil
 	}

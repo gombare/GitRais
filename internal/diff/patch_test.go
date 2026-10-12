@@ -130,3 +130,47 @@ func TestBuildPatchRejectsNonModify(t *testing.T) {
 		t.Fatal("partial staging of added files must be refused")
 	}
 }
+
+// A "\ No newline" line that stays as context but is followed by other emitted
+// lines becomes -x / \ / +x, so the newline fix is staged with the selection.
+func TestBuildPatchNoNewlineFollowedByEmittedLines(t *testing.T) {
+	const stage = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,3 @@\n a\n-b\n\\ No newline at end of file\n+b\n+c\n"
+	files, _ := Parse([]byte(stage))
+	// stage only "+c" (line 4)
+	p, ok := BuildPatch(files[0], Selection{0: {4: true}}, ForStage)
+	want := "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,3 @@\n a\n-b\n\\ No newline at end of file\n+b\n+c\n"
+	if !ok || string(p) != want {
+		t.Fatalf("stage patch:\n%q\nwant:\n%q", p, want)
+	}
+	// nothing emitted after the no-EOL line: it stays context with its marker
+	const tail = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n-a\n+A\n b\n\\ No newline at end of file\n"
+	files, _ = Parse([]byte(tail))
+	p, ok = BuildPatch(files[0], Selection{0: {0: true, 1: true}}, ForStage)
+	if !ok || string(p) != tail {
+		t.Fatalf("tail patch:\n%q\nwant:\n%q", p, tail)
+	}
+	// unstage only "-b" (line 1): the restored "b" is followed by context on
+	// the result (old) side, so it loses its marker.
+	files, _ = Parse([]byte(stage))
+	p, ok = BuildPatch(files[0], Selection{0: {1: true}}, ForUnstage)
+	want = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,4 +1,3 @@\n a\n-b\n b\n c\n"
+	if !ok || string(p) != want {
+		t.Fatalf("unstage patch:\n%q\nwant:\n%q", p, want)
+	}
+	// both sides without EOL, only the new side selected
+	const both = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n"
+	files, _ = Parse([]byte(both))
+	p, ok = BuildPatch(files[0], Selection{0: {3: true}}, ForStage)
+	want = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,3 @@\n a\n-b\n\\ No newline at end of file\n+b\n+c\n\\ No newline at end of file\n"
+	if !ok || string(p) != want {
+		t.Fatalf("both patch:\n%q\nwant:\n%q", p, want)
+	}
+	// CRLF: the re-added line keeps the file's line ending
+	const crlf = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,3 @@\n a\r\n-b\n\\ No newline at end of file\n+b\r\n+c\r\n"
+	files, _ = Parse([]byte(crlf))
+	p, ok = BuildPatch(files[0], Selection{0: {4: true}}, ForStage)
+	want = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,2 +1,3 @@\n a\r\n-b\n\\ No newline at end of file\n+b\r\n+c\r\n"
+	if !ok || string(p) != want {
+		t.Fatalf("crlf patch:\n%q\nwant:\n%q", p, want)
+	}
+}

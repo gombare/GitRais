@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gitrais/internal/diff"
+	"gitrais/internal/gitexec"
 	"gitrais/internal/status"
 	"gitrais/internal/testutil"
 )
@@ -54,6 +55,31 @@ func TestStageUnstageFiles(t *testing.T) {
 func TestUnstageOnUnbornBranch(t *testing.T) {
 	repo := testutil.NewRepo(t)
 	repo.Write("a.txt", "1\n")
+	if err := StageAll(bg, repo.R, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	// an "AM" file (staged, then modified in the worktree) must be unstageable
+	// too, and its worktree content must survive.
+	repo.Write("am.txt", "staged\n")
+	repo.Git("add", "am.txt")
+	repo.Write("am.txt", "modified\n")
+	if err := UnstageFiles(bg, repo.R, repo.Dir, []string{"am.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(repo.Path("am.txt")); string(b) != "modified\n" {
+		t.Fatalf("am.txt = %q", b)
+	}
+	repo.Git("add", "am.txt")
+	repo.Write("am.txt", "modified again\n")
+	if err := UnstageAll(bg, repo.R, repo.Dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(repo.Path("am.txt")); string(b) != "modified again\n" {
+		t.Fatalf("am.txt = %q", b)
+	}
+	if s := st(t, repo); len(s.Staged()) != 0 {
+		t.Fatalf("staged = %+v", s.Staged())
+	}
 	if err := StageAll(bg, repo.R, repo.Dir); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +230,7 @@ func TestPartialStageCRLF(t *testing.T) {
 	if err != nil || string(b) != "a\r\nB\r\nC\r\n" {
 		t.Fatal("worktree changed")
 	}
-	if got := repo.Git("cat-file", "-p", ":f.txt"); got != "a\r\nc\r\nB" {
+	if got := indexBlob(t, repo, "f.txt"); got != "a\r\nc\r\nB\r\n" {
 		t.Fatalf("index = %q", got)
 	}
 }
@@ -343,5 +369,179 @@ func TestWipDiffUntracked(t *testing.T) {
 	}
 	if fd.Status != "A" || fd.NewPath != "n.txt" || len(fd.Hunks) != 1 || len(fd.Hunks[0].Lines) != 2 {
 		t.Fatalf("fd = %+v", fd)
+	}
+}
+
+// indexBlob returns the raw (untrimmed) bytes of the index entry for path.
+func indexBlob(t *testing.T, repo *testutil.Repo, path string) string {
+	t.Helper()
+	out, err := repo.R.Run(bg, gitexec.Cmd{Dir: repo.Dir, Args: []string{"cat-file", "blob", ":" + path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func selectLines(fd diff.FileDiff, hi int, match func(diff.Line) bool) diff.Selection {
+	sel := diff.Selection{hi: {}}
+	for i, l := range fd.Hunks[hi].Lines {
+		if match(l) {
+			sel[hi][i] = true
+		}
+	}
+	return sel
+}
+
+// A line without trailing newline that stays in the result but is followed by
+// other selected lines must gain a newline; otherwise git apply glues the
+// next line onto it.
+func TestPartialStageAfterNoEOLLine(t *testing.T) {
+	for _, eol := range []string{"\n", "\r\n"} {
+		repo := testutil.NewRepo(t)
+		repo.Write("f.txt", "a"+eol+"b")
+		repo.CommitAll("base")
+		repo.Write("f.txt", "a"+eol+"b"+eol+"c"+eol)
+		fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "f.txt"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// diff: " a", "-b", "\", "+b", "+c": stage only "+c"
+		sel := selectLines(fd, 0, func(l diff.Line) bool { return l.Kind == diff.Add && strings.TrimSuffix(l.Text, "\r") == "c" })
+		p, ok := diff.BuildPatch(fd, sel, diff.ForStage)
+		if !ok {
+			t.Fatal("no patch")
+		}
+		if err := ApplyPatch(bg, repo.R, repo.Dir, p, false); err != nil {
+			t.Fatalf("apply: %v\n%s", err, p)
+		}
+		if got, want := indexBlob(t, repo, "f.txt"), "a"+eol+"b"+eol+"c"+eol; got != want {
+			t.Fatalf("index = %q, want %q\n%s", got, want, p)
+		}
+	}
+}
+
+// Unstage mirror: HEAD "a\nb", index "a\nb\nc\n", diff " a", "-b", "\", "+b",
+// "+c". Unstaging only "-b" restores HEAD's "b" line while keeping the staged
+// "b" and "c" lines; the restored line is no longer last, so it gets a
+// newline: the index becomes "a\nb\nb\nc\n".
+func TestPartialUnstageNoEOLLineFollowedByContext(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("f.txt", "a\nb")
+	repo.CommitAll("base")
+	repo.Write("f.txt", "a\nb\nc\n")
+	repo.Git("add", "f.txt")
+	fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "f.txt", Staged: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sel := selectLines(fd, 0, func(l diff.Line) bool { return l.Kind == diff.Del })
+	p, ok := diff.BuildPatch(fd, sel, diff.ForUnstage)
+	if !ok {
+		t.Fatal("no patch")
+	}
+	if err := ApplyPatch(bg, repo.R, repo.Dir, p, true); err != nil {
+		t.Fatalf("apply: %v\n%s", err, p)
+	}
+	if got := indexBlob(t, repo, "f.txt"); got != "a\nb\nb\nc\n" {
+		t.Fatalf("index = %q\n%s", got, p)
+	}
+	if b, _ := os.ReadFile(repo.Path("f.txt")); string(b) != "a\nb\nc\n" {
+		t.Fatalf("worktree changed: %q", b)
+	}
+}
+
+func TestDiscardRefusesGitDirAnyCase(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("base.txt", "1\n")
+	repo.CommitAll("base")
+	repo.Write("sub/.git/x", "nested\n")
+	for _, bad := range []string{".GIT/description", ".Git/config", "sub/.git/x", "sub/.GIT/x", "sub/.git", "./.git/description"} {
+		if err := DiscardFiles(bg, repo.R, repo.Dir, nil, []string{bad}); err == nil {
+			t.Fatalf("path %q must be rejected", bad)
+		}
+	}
+	if _, err := os.Stat(repo.Path(".git/description")); err != nil {
+		t.Fatalf(".git/description removed: %v", err)
+	}
+	if _, err := os.Stat(repo.Path("sub/.git/x")); err != nil {
+		t.Fatalf("sub/.git/x removed: %v", err)
+	}
+}
+
+// Only untracked files are deleted: tracked/staged and ignored files inside an
+// "untracked" directory survive.
+func TestDiscardUntrackedKeepsTrackedAndIgnored(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write(".gitignore", "*.log\n")
+	repo.CommitAll("base")
+	repo.Write("d/staged.txt", "s\n")
+	repo.Git("add", "d/staged.txt")
+	repo.Write("d/junk.txt", "j\n")
+	repo.Write("d/keep.log", "l\n")
+	repo.Write("d/e/deep.txt", "x\n")
+	if err := DiscardFiles(bg, repo.R, repo.Dir, nil, []string{"d"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, keep := range []string{"d/staged.txt", "d/keep.log"} {
+		if _, err := os.Stat(repo.Path(keep)); err != nil {
+			t.Fatalf("%s removed: %v", keep, err)
+		}
+	}
+	for _, gone := range []string{"d/junk.txt", "d/e"} {
+		if _, err := os.Stat(repo.Path(gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s not removed", gone)
+		}
+	}
+}
+
+func TestWipDiffIgnoresTextconv(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Git("config", "diff.up.textconv", "tr a-z A-Z <")
+	repo.Write(".gitattributes", "*.txt diff=up\n")
+	repo.Write("f.txt", "a\nb\nc\n")
+	repo.CommitAll("base")
+	repo.Write("f.txt", "a\nx\nc\n")
+	fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "f.txt"})
+	if err != nil || len(fd.Hunks) != 1 {
+		t.Fatalf("fd = %+v err = %v", fd, err)
+	}
+	p, ok := diff.BuildPatch(fd, diff.SelectHunk(fd, 0), diff.ForStage)
+	if !ok {
+		t.Fatal("no patch")
+	}
+	if err := ApplyPatch(bg, repo.R, repo.Dir, p, false); err != nil {
+		t.Fatalf("apply: %v\n%s", err, p)
+	}
+	if got := indexBlob(t, repo, "f.txt"); got != "a\nx\nc\n" {
+		t.Fatalf("index = %q", got)
+	}
+	cfd, err := CommitFileDiff(bg, repo.R, repo.Dir, "HEAD", "HEAD", "f.txt", "")
+	_ = cfd
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWipDiffUnmergedIsConflicted(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("f.txt", "1\n2\n3\n")
+	repo.CommitAll("base")
+	repo.Git("checkout", "-q", "-b", "side")
+	repo.Write("f.txt", "1\nS\n3\n")
+	repo.CommitAll("side")
+	repo.Git("checkout", "-q", "-")
+	repo.Write("f.txt", "1\nM\n3\n")
+	repo.CommitAll("main")
+	if _, err := repo.R.Run(bg, gitexec.Cmd{Dir: repo.Dir, Args: []string{"merge", "side"}}); err == nil {
+		t.Fatal("expected conflict")
+	}
+	for _, staged := range []bool{false, true} {
+		fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "f.txt", Staged: staged})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fd.Status != "U" {
+			t.Fatalf("staged=%v: status = %q, want U", staged, fd.Status)
+		}
 	}
 }

@@ -80,16 +80,91 @@ func hdrName(prefix, p string, fileLine bool) string {
 	return q
 }
 
+// patchLine is one body line of a built hunk: op is ' ', '-' or '+'; noEOL
+// marks a line followed by "\ No newline at end of file".
+type patchLine struct {
+	op    byte
+	text  string
+	noEOL bool
+}
+
+// onSide reports whether the line belongs to the old (or new) side.
+func (l patchLine) onSide(old bool) bool {
+	if old {
+		return l.op != '+'
+	}
+	return l.op != '-'
+}
+
+// fixNoEOL makes sure a line without trailing newline is never followed by
+// another line on the side the patch produces (the new side when staging,
+// the old side when unstaging, since that patch is applied in reverse).
+// Otherwise git apply would glue the next line onto it. The side the patch is
+// applied to always matches git's output, so its markers are kept:
+//   - a context line is split into a marker-carrying line on the preimage
+//     side and a newline-terminated copy on the result side;
+//   - a result-only line simply loses its marker.
+//
+// The added newline uses the hunk's line ending (CRLF when other lines end in
+// "\r").
+func fixNoEOL(body []patchLine, resultOld bool, cr string) []patchLine {
+	out := make([]patchLine, 0, len(body)+1)
+	for i, l := range body {
+		if !l.noEOL || !l.onSide(resultOld) {
+			out = append(out, l)
+			continue
+		}
+		followed := false
+		for _, n := range body[i+1:] {
+			if n.onSide(resultOld) {
+				followed = true
+				break
+			}
+		}
+		if !followed {
+			out = append(out, l)
+			continue
+		}
+		fixed := patchLine{text: l.text + cr}
+		if l.op != ' ' {
+			fixed.op = l.op
+			out = append(out, fixed)
+			continue
+		}
+		// Context: "-x" then "+x", with the marker on the preimage side.
+		if resultOld {
+			fixed.op = '-'
+			out = append(out, fixed, patchLine{op: '+', text: l.text, noEOL: true})
+		} else {
+			fixed.op = '+'
+			out = append(out, patchLine{op: '-', text: l.text, noEOL: true}, fixed)
+		}
+	}
+	return out
+}
+
+// hunkCR returns "\r" when the hunk's lines use CRLF endings.
+func hunkCR(h Hunk) string {
+	for _, l := range h.Lines {
+		if l.Kind != NoNewline && strings.HasSuffix(l.Text, "\r") {
+			return "\r"
+		}
+	}
+	return ""
+}
+
 // BuildPatch builds a single-file patch containing only the selected changes.
 //
 // ForStage (index->worktree diff): unselected Add lines are dropped and
 // unselected Del lines become context. ForUnstage (HEAD->index diff, applied
 // in reverse): unselected Add lines become context and unselected Del lines
 // are dropped. Hunk headers are recomputed. A "\ No newline" marker is kept
-// only when the line it refers to is emitted. It returns false when nothing is
-// selected, or when the file is not a plain modification (binary, added,
-// deleted, renamed, conflicted): partial staging is only supported for those
-// with Status "M".
+// only when the line it refers to is emitted and still ends the resulting
+// file; a no-EOL line that would end up followed by other lines gets a newline
+// instead (for context lines this stages the newline fix as "-x" / marker /
+// "+x"). It returns false when nothing is selected, or when the file is not a
+// plain modification (binary, added, deleted, renamed, conflicted): partial
+// staging is only supported for those with Status "M".
 func BuildPatch(f FileDiff, sel Selection, mode Mode) ([]byte, bool) {
 	if f.Binary || f.Status != "M" {
 		return nil, false
@@ -108,40 +183,40 @@ func BuildPatch(f FileDiff, sel Selection, mode Mode) ([]byte, bool) {
 		if len(picked) == 0 {
 			continue
 		}
-		var body []string
-		oldN, newN, changes := 0, 0, 0
+		var body []patchLine
+		changes := 0
 		emitted := false
 		for li, l := range h.Lines {
 			chosen := picked[li]
 			switch l.Kind {
 			case Context:
-				body = append(body, " "+l.Text)
-				oldN, newN, emitted = oldN+1, newN+1, true
+				body = append(body, patchLine{op: ' ', text: l.Text})
+				emitted = true
 			case Add:
 				switch {
 				case chosen:
-					body = append(body, "+"+l.Text)
-					newN, changes, emitted = newN+1, changes+1, true
+					body = append(body, patchLine{op: '+', text: l.Text})
+					changes, emitted = changes+1, true
 				case mode == ForUnstage:
-					body = append(body, " "+l.Text)
-					oldN, newN, emitted = oldN+1, newN+1, true
+					body = append(body, patchLine{op: ' ', text: l.Text})
+					emitted = true
 				default:
 					emitted = false
 				}
 			case Del:
 				switch {
 				case chosen:
-					body = append(body, "-"+l.Text)
-					oldN, changes, emitted = oldN+1, changes+1, true
+					body = append(body, patchLine{op: '-', text: l.Text})
+					changes, emitted = changes+1, true
 				case mode == ForStage:
-					body = append(body, " "+l.Text)
-					oldN, newN, emitted = oldN+1, newN+1, true
+					body = append(body, patchLine{op: ' ', text: l.Text})
+					emitted = true
 				default:
 					emitted = false
 				}
 			case NoNewline:
 				if emitted {
-					body = append(body, "\\"+l.Text)
+					body[len(body)-1].noEOL = true
 				}
 			}
 		}
@@ -149,6 +224,16 @@ func BuildPatch(f FileDiff, sel Selection, mode Mode) ([]byte, bool) {
 			continue
 		}
 		any = true
+		body = fixNoEOL(body, mode == ForUnstage, hunkCR(h))
+		oldN, newN := 0, 0
+		for _, l := range body {
+			if l.onSide(true) {
+				oldN++
+			}
+			if l.onSide(false) {
+				newN++
+			}
+		}
 		newStart := h.OldStart + offset
 		if mode == ForUnstage {
 			// The patch is applied in reverse onto the index, which is the
@@ -157,8 +242,12 @@ func BuildPatch(f FileDiff, sel Selection, mode Mode) ([]byte, bool) {
 		}
 		fmt.Fprintf(&b, "@@ -%d,%d +%d,%d @@\n", h.OldStart, oldN, newStart, newN)
 		for _, l := range body {
-			b.WriteString(l)
+			b.WriteByte(l.op)
+			b.WriteString(l.text)
 			b.WriteByte('\n')
+			if l.noEOL {
+				b.WriteString("\\ No newline at end of file\n")
+			}
 		}
 		offset += newN - oldN
 	}
