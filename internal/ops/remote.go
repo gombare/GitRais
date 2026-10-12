@@ -140,9 +140,9 @@ func Push(ctx context.Context, r *gitexec.Runner, dir string, o PushOptions, p O
 }
 
 // Clone clones url into dest. dest must not exist or must be an empty
-// directory (otherwise ErrDestNotEmpty). If the clone fails and dest did not
-// exist beforehand, any partially created dest is removed; a pre-existing
-// empty directory is kept. Credentials embedded in url are redacted by
+// directory (otherwise ErrDestNotEmpty) and must be absolute. If the clone
+// fails, only what this call created is removed: a dest it created is deleted,
+// a pre-existing empty directory is emptied but kept. Credentials embedded in url are redacted by
 // gitexec in returned errors.
 func Clone(ctx context.Context, r *gitexec.Runner, url, dest string, p OnProgress) error {
 	if url == "" || strings.HasPrefix(url, "-") {
@@ -151,14 +151,27 @@ func Clone(ctx context.Context, r *gitexec.Runner, url, dest string, p OnProgres
 	if dest == "" || strings.HasPrefix(dest, "-") {
 		return fmt.Errorf("invalid destination: %q", dest)
 	}
-	dest, err := filepath.Abs(dest)
-	if err != nil {
+	if !filepath.IsAbs(dest) {
+		return fmt.Errorf("destination must be an absolute path: %q", dest)
+	}
+	dest = filepath.Clean(dest)
+	parent := filepath.Dir(dest)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	existed := false
-	if fi, serr := os.Stat(dest); serr == nil {
-		existed = true
-		if !fi.IsDir() {
+	// Claim dest atomically: only what this call creates is ever removed, and
+	// a symlink at dest is never followed or deleted.
+	created := false
+	if err := os.Mkdir(dest, 0o755); err == nil {
+		created = true
+	} else if !os.IsExist(err) {
+		return err
+	} else {
+		fi, lerr := os.Lstat(dest)
+		if lerr != nil {
+			return lerr
+		}
+		if !fi.IsDir() { // regular file, symlink (even dangling), ...
 			return ErrDestNotEmpty
 		}
 		entries, rerr := os.ReadDir(dest)
@@ -168,16 +181,16 @@ func Clone(ctx context.Context, r *gitexec.Runner, url, dest string, p OnProgres
 		if len(entries) > 0 {
 			return ErrDestNotEmpty
 		}
-	} else if !os.IsNotExist(serr) {
-		return serr
 	}
-	parent := filepath.Dir(dest)
-	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return err
-	}
-	_, err = r.Run(ctx, gitexec.Cmd{Dir: parent, Args: []string{"clone", "--progress", "--", url, dest}, OnStderr: withProgress(p)})
-	if err != nil && !existed {
-		_ = os.RemoveAll(dest)
+	_, err := r.Run(ctx, gitexec.Cmd{Dir: parent, Args: []string{"clone", "--progress", "--", url, dest}, OnStderr: withProgress(p)})
+	if err != nil {
+		if created {
+			_ = os.RemoveAll(dest)
+		} else if entries, rerr := os.ReadDir(dest); rerr == nil {
+			for _, e := range entries {
+				_ = os.RemoveAll(filepath.Join(dest, e.Name()))
+			}
+		}
 	}
 	return err
 }
@@ -186,6 +199,9 @@ func Clone(ctx context.Context, r *gitexec.Runner, url, dest string, p OnProgres
 func Init(ctx context.Context, r *gitexec.Runner, dir string) error {
 	if dir == "" {
 		return fmt.Errorf("invalid directory: %q", dir)
+	}
+	if !filepath.IsAbs(dir) {
+		return fmt.Errorf("directory must be an absolute path: %q", dir)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err

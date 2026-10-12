@@ -3,6 +3,7 @@ package gitexec
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -41,11 +42,42 @@ func (e *GitError) Error() string {
 	if len(e.Args) > 0 {
 		sub = e.Args[0]
 	}
-	line := strings.TrimSpace(e.Stderr)
-	if i := strings.IndexByte(line, '\n'); i >= 0 {
-		line = line[:i]
-	}
+	line := summarize(e.Stderr)
 	return fmt.Sprintf("git %s: exit %d: %s", sub, e.ExitCode, line)
+}
+
+var noiseRE = regexp.MustCompile(`^(?:remote: )?(?:Enumerating|Counting|Compressing|Writing|Receiving|Resolving|Total|Delta compression|Cloning into)\b`)
+
+// summarize picks the most meaningful stderr line for Error(): git run with
+// --progress prepends progress noise, so prefer fatal:/error:/rejection lines,
+// skipping progress output, and fall back to the first non-noise line.
+func summarize(stderr string) string {
+	var fallback, first string
+	for _, raw := range strings.Split(stderr, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = line
+		}
+		if strings.ContainsRune(line, '\r') || noiseRE.MatchString(line) {
+			continue
+		}
+		if _, ok := ParseProgressLine(line); ok {
+			continue
+		}
+		if strings.HasPrefix(line, "fatal:") || strings.HasPrefix(line, "error:") || strings.HasPrefix(line, "! [") {
+			return line
+		}
+		if fallback == "" {
+			fallback = line
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return first
 }
 
 func (e *GitError) Unwrap() error { return e.err }
@@ -60,9 +92,10 @@ var rules = []struct {
 	{KindAuthFailed, []string{"Authentication failed", "could not read Username", "could not read Password",
 		"Permission denied (publickey", "Invalid username or password", "terminal prompts disabled",
 		"The requested URL returned error: 401", "The requested URL returned error: 403"}},
-	{KindNonFastForward, []string{"(fetch first)", "(non-fast-forward)", "Updates were rejected"}},
+	{KindNonFastForward, []string{"(fetch first)", "(non-fast-forward)", "Updates were rejected", "(stale info)"}},
 	{KindConflict, []string{"CONFLICT (", "Automatic merge failed", "could not apply"}},
-	{KindDirtyWorktree, []string{"would be overwritten by", "Please commit your changes or stash them"}},
+	{KindDirtyWorktree, []string{"would be overwritten by", "Please commit your changes or stash them",
+		"cannot pull with rebase: You have unstaged changes", "cannot pull with rebase: Your index contains uncommitted changes"}},
 	{KindLocked, []string{".lock': File exists", "Unable to create '"}},
 	{KindNetwork, []string{"Could not resolve host", "Connection refused", "Connection timed out",
 		"Failed to connect", "Network is unreachable", "Could not read from remote repository"}},

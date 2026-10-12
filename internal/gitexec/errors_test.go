@@ -48,3 +48,51 @@ func TestNewGitErrorRedactsStderr(t *testing.T) {
 		t.Fatalf("credentials leaked: %q", e.Stderr)
 	}
 }
+
+func TestGitErrorMessageSkipsProgressNoise(t *testing.T) {
+	cases := []struct {
+		name, stderr, want string
+	}{
+		{"push rejected",
+			"Enumerating objects: 5, done.\nCounting objects: 100% (5/5), done.\nWriting objects: 100% (3/3), 250 bytes | 250.00 KiB/s, done.\nTotal 3 (delta 0), reused 0 (delta 0), pack-reused 0\nremote: Enumerating objects: 5, done.\nremote: Counting objects: 100% (5/5), done.\nTo /tmp/bare\n ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs to '/tmp/bare'\n",
+			"! [remote rejected] main -> main (pre-receive hook declined)"},
+		{"push error line",
+			"remote: Enumerating objects: 5, done.\nremote: Counting objects: 100% (5/5)\rremote: Counting objects: 100% (5/5), done.\nerror: failed to push some refs to 'x'\n",
+			"error: failed to push some refs to 'x'"},
+		{"clone fatal",
+			"Cloning into 'x'...\nremote: Enumerating objects: 3, done.\nfatal: early EOF\n",
+			"fatal: early EOF"},
+		{"carriage return noise only",
+			"Receiving objects:  50% (1/2)\rReceiving objects: 100% (2/2)\nsomething odd happened\n",
+			"something odd happened"},
+		{"fallback to first non-empty",
+			"\n\nplain message\nsecond\n",
+			"plain message"},
+	}
+	for _, c := range cases {
+		e := newGitError([]string{"push"}, 1, c.stderr, nil)
+		want := "git push: exit 1: " + c.want
+		if got := e.Error(); got != want {
+			t.Errorf("%s: Error() = %q, want %q", c.name, got, want)
+		}
+		if e.Stderr != c.stderr {
+			t.Errorf("%s: Stderr must stay complete", c.name)
+		}
+	}
+}
+
+func TestClassifyStaleInfoAndPullRebaseDirty(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   Kind
+	}{
+		{" ! [rejected]        main -> main (stale info)\nerror: failed to push some refs", KindNonFastForward},
+		{"error: cannot pull with rebase: You have unstaged changes.", KindDirtyWorktree},
+		{"error: cannot pull with rebase: Your index contains uncommitted changes.", KindDirtyWorktree},
+	}
+	for _, c := range cases {
+		if got := Classify(c.stderr); got != c.want {
+			t.Errorf("Classify(%q) = %s, want %s", c.stderr, got, c.want)
+		}
+	}
+}

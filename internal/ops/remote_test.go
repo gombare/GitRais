@@ -300,3 +300,85 @@ func TestInit(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 }
+
+func TestCloneDanglingSymlinkDestIsNotDeleted(t *testing.T) {
+	a := testutil.NewRepo(t)
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "-u", "origin", "main")
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "link")
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), dest); err != nil {
+		t.Fatal(err)
+	}
+	if err := Clone(bg, a.R, bare, dest, nil); err == nil {
+		t.Fatal("symlink dest must be rejected")
+	}
+	if _, err := os.Lstat(dest); err != nil {
+		t.Fatalf("symlink must still exist: %v", err)
+	}
+	// A failing clone must not delete it either.
+	if err := Clone(bg, a.R, "http://127.0.0.1:1/repo.git", dest, nil); err == nil {
+		t.Fatal("expected failure")
+	}
+	if _, err := os.Lstat(dest); err != nil {
+		t.Fatalf("symlink must still exist after failed clone: %v", err)
+	}
+}
+
+func TestCloneFailureKeepsPreexistingEmptyDir(t *testing.T) {
+	r := testutil.Runner(t)
+	dest := t.TempDir()
+	if err := Clone(bg, r, "http://127.0.0.1:1/repo.git", dest, nil); err == nil {
+		t.Fatal("expected failure")
+	}
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		t.Fatalf("dir must still exist: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("dir must be empty, has %d entries", len(entries))
+	}
+}
+
+func TestCloneInitRejectRelativePaths(t *testing.T) {
+	r := testutil.Runner(t)
+	if err := Clone(bg, r, "http://127.0.0.1:1/repo.git", "rel/dest", nil); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("Clone relative dest: %v", err)
+	}
+	if err := Init(bg, r, "rel/dir"); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("Init relative dir: %v", err)
+	}
+	if _, err := os.Stat("rel"); err == nil {
+		t.Fatal("relative dir must not be created")
+	}
+}
+
+func TestPushHookRejectedErrorMessageIsMeaningful(t *testing.T) {
+	a := testutil.NewRepo(t)
+	a.Write("a.txt", "1\n")
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "-u", "origin", "main")
+	hook := filepath.Join(bare, "hooks", "pre-receive")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'no pushes today'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a.Write("a.txt", "2\n")
+	a.CommitAll("two")
+	err := Push(bg, a.R, a.Dir, PushOptions{Remote: "origin", Branch: "main"}, nil)
+	if err == nil {
+		t.Fatal("expected rejection")
+	}
+	if gitexec.KindOf(err) != gitexec.KindHookRejected {
+		t.Fatalf("want HookRejected, got %v", err)
+	}
+	if strings.Contains(err.Error(), "Enumerating objects") || !strings.Contains(err.Error(), "rejected") {
+		t.Fatalf("unhelpful message: %q", err.Error())
+	}
+}
