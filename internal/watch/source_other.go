@@ -8,6 +8,6 @@ import (
 )
 
 // NewSource is only implemented on macOS (FSEvents).
-func NewSource(root string) (Source, error) {
+func NewSource(paths ...string) (Source, error) {
 	return nil, errors.New("watch: file system events are not supported on " + runtime.GOOS)
 }

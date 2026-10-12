@@ -10,9 +10,19 @@ import (
 type Source interface {
 	// Events returns the batch channel; it is closed after Close.
 	Events() <-chan []string
+	// Flush returns once every change that happened before the call has been
+	// received from Events by its reader (it does not wait for the reader to
+	// process it), or once the source is closed. It is called from a goroutine
+	// other than the reader's, which must keep reading meanwhile.
+	Flush()
 	// Close stops the source. It must be safe to call more than once.
 	Close() error
 }
+
+// rescanAll is a sentinel "path" a Source puts in a batch when the batch does not
+// describe every change (events coalesced or dropped, watched root moved): the
+// Watcher then reports every Kind.
+const rescanAll = "\x00rescan-all"
 
 // Watcher turns raw path batches into debounced, merged Kind notifications.
 //
@@ -43,6 +53,7 @@ type Watcher struct {
 	closeErr  error
 	emitMu    sync.Mutex // serializes emit calls
 	done      chan struct{}
+	barrierCh chan chan struct{}
 }
 
 type heldEntry struct {
@@ -51,10 +62,18 @@ type heldEntry struct {
 }
 
 // New starts a Watcher that reads src. root and gitDir should be real paths.
+//
 // emit is called from a separate goroutine, never concurrently with itself and
-// never after Close has returned; it must not call Close.
+// never after Close has returned. Close waits for an emit in progress, so emit
+// must not call Close nor block on anything (a lock, a channel send) that a
+// caller of Close may hold or wait on while Close runs.
+//
+// ignore is called on the watcher goroutine and must be fast. It is also told,
+// as ".git/info/exclude", when the repository's info/exclude file changes, so a
+// filter such as IgnoreFilter can refresh; a plain predicate just answers it.
 func New(root, gitDir string, src Source, debounce time.Duration, ignore func(string) bool, emit func(Kind)) *Watcher {
-	w := &Watcher{root: root, gitDir: gitDir, src: src, debounce: debounce, ignore: ignore, emit: emit, done: make(chan struct{})}
+	w := &Watcher{root: root, gitDir: gitDir, src: src, debounce: debounce, ignore: ignore, emit: emit,
+		done: make(chan struct{}), barrierCh: make(chan chan struct{})}
 	w.idle = sync.NewCond(&w.mu)
 	go w.loop()
 	return w
@@ -62,14 +81,53 @@ func New(root, gitDir string, src Source, debounce time.Duration, ignore func(st
 
 func (w *Watcher) loop() {
 	defer close(w.done)
-	for paths := range w.src.Events() {
-		var k Kind
-		for _, p := range paths {
-			k |= Classify(w.root, w.gitDir, p, w.ignore)
+	events := w.src.Events()
+	for {
+		select {
+		case paths, ok := <-events:
+			if !ok {
+				return
+			}
+			w.handle(paths)
+		case ack := <-w.barrierCh:
+			// Every batch received before this point has been handled.
+			close(ack)
 		}
-		if k != 0 {
-			w.add(k)
+	}
+}
+
+func (w *Watcher) handle(paths []string) {
+	var k Kind
+	for _, p := range paths {
+		if p == rescanAll {
+			k |= WIP | Refs
+			continue
 		}
+		if w.ignore != nil {
+			if rel, ok := under(w.gitDir, p); ok && rel == "info/exclude" {
+				w.ignore(excludeRel)
+			}
+		}
+		k |= Classify(w.root, w.gitDir, p, w.ignore)
+	}
+	if k != 0 {
+		w.add(k)
+	}
+}
+
+// barrier returns once every change that happened before the call has been
+// classified (or the watcher is closed). It must not run on the loop goroutine.
+func (w *Watcher) barrier() {
+	w.src.Flush()
+	ack := make(chan struct{})
+	select {
+	case w.barrierCh <- ack:
+	case <-w.done:
+		return
+	}
+	select {
+	case <-ack:
+	case <-w.done:
 	}
 }
 
@@ -142,6 +200,12 @@ func (w *Watcher) fire(gen int) {
 // repository). The returned resume must be called once; further calls are no-ops.
 // resume(true) delivers what was held, resume(false) drops the events observed
 // since this Suspend call.
+//
+// resume(false) first flushes the source and waits until everything it held back
+// has been classified (the OS delivers file events with some latency), so the
+// app's own writes made while suspended are really discarded. It may therefore
+// block briefly; it may be called from any goroutine, including from emit, but
+// not from ignore.
 func (w *Watcher) Suspend() (resume func(flush bool)) {
 	w.mu.Lock()
 	w.suspended++
@@ -153,6 +217,9 @@ func (w *Watcher) Suspend() (resume func(flush bool)) {
 	var once sync.Once
 	return func(flush bool) {
 		once.Do(func() {
+			if !flush && !w.closed.Load() {
+				w.barrier() // still suspended: late events land in held and are dropped below
+			}
 			w.mu.Lock()
 			defer w.mu.Unlock()
 			w.suspended--

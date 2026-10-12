@@ -7,13 +7,36 @@ import (
 	"time"
 )
 
+// fakeSource delivers batches sent on ch. Batches passed to hold model changes the
+// OS has seen but not delivered yet (FSEvents latency): Flush, or the test via
+// deliverLate, sends them.
 type fakeSource struct {
-	ch   chan []string
-	once sync.Once
+	ch      chan []string
+	once    sync.Once
+	mu      sync.Mutex
+	late    [][]string
+	flushes atomic.Int32
 }
 
 func (f *fakeSource) Events() <-chan []string { return f.ch }
 func (f *fakeSource) Close() error            { f.once.Do(func() { close(f.ch) }); return nil }
+func (f *fakeSource) Flush()                  { f.flushes.Add(1); f.deliverLate() }
+
+func (f *fakeSource) hold(batch []string) {
+	f.mu.Lock()
+	f.late = append(f.late, batch)
+	f.mu.Unlock()
+}
+
+func (f *fakeSource) deliverLate() {
+	f.mu.Lock()
+	late := f.late
+	f.late = nil
+	f.mu.Unlock()
+	for _, b := range late {
+		f.ch <- b // unbuffered: received by the watcher loop when this returns
+	}
+}
 
 func collect() (func(Kind), func() []Kind) {
 	var mu sync.Mutex
@@ -231,4 +254,77 @@ func TestConcurrentSuspendAndEvents(t *testing.T) {
 		t.Fatal("watcher stuck suspended")
 	}
 	w.Close()
+}
+
+func TestResumeDiscardWaitsForLateEvents(t *testing.T) {
+	w, src, got := newTestWatcher(20 * time.Millisecond)
+	defer w.Close()
+	resume := w.Suspend()
+	src.hold([]string{"/r/.git/refs/heads/own"}) // the app's own write, still in flight
+	resume(false)
+	src.deliverLate() // what the OS would deliver later anyway (no-op after a Flush)
+	time.Sleep(80 * time.Millisecond)
+	if g := got(); len(g) != 0 {
+		t.Fatalf("events produced while suspended leaked after resume(false): %v", g)
+	}
+	if src.flushes.Load() != 1 {
+		t.Fatalf("resume(false) must flush the source once, got %d", src.flushes.Load())
+	}
+	src.ch <- []string{"/r/a.txt"}
+	time.Sleep(80 * time.Millisecond)
+	if g := got(); len(g) != 1 || g[0] != WIP {
+		t.Fatalf("event after resume lost: %v", g)
+	}
+}
+
+func TestResumeFlushDoesNotBarrier(t *testing.T) {
+	w, src, _ := newTestWatcher(20 * time.Millisecond)
+	defer w.Close()
+	w.Suspend()(true)
+	if src.flushes.Load() != 0 {
+		t.Fatal("resume(true) needs no barrier")
+	}
+}
+
+func TestResumeDiscardNoDeadlock(t *testing.T) {
+	// From inside emit (timer goroutine) and after Close, resume(false) must return.
+	src := &fakeSource{ch: make(chan []string)}
+	var w *Watcher
+	ready := make(chan struct{})
+	returned := make(chan struct{}, 1)
+	w = New("/r", "/r/.git", src, time.Millisecond, nil, func(Kind) {
+		<-ready
+		w.Suspend()(false)
+		select {
+		case returned <- struct{}{}:
+		default:
+		}
+	})
+	close(ready)
+	src.ch <- []string{"/r/a.txt"}
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume(false) from emit deadlocked")
+	}
+	w.Close()
+	done := make(chan struct{})
+	go func() { w.Suspend()(false); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("resume(false) after Close deadlocked")
+	}
+}
+
+func TestRescanSentinelForcesEverything(t *testing.T) {
+	w, src, got := newTestWatcher(20 * time.Millisecond)
+	defer w.Close()
+	// A coalesced event on the git dir alone would classify as nothing useful;
+	// the sentinel forces a full refresh.
+	src.ch <- []string{"/r/.git/objects", rescanAll}
+	time.Sleep(80 * time.Millisecond)
+	if g := got(); len(g) != 1 || g[0] != WIP|Refs {
+		t.Fatalf("got %v, want [WIP|Refs]", g)
+	}
 }

@@ -1,5 +1,15 @@
 // Package watch observes a repository and reports changes to the working tree (WIP)
 // or to refs.
+//
+// Typical wiring: NewSource(root) — or NewSource(root, gitDir) when gitDir lives
+// outside root (linked worktree, --separate-git-dir) — then New with an
+// IgnoreFilter's Ignored as the ignore predicate.
+//
+// Known limitation: in a linked worktree, branches, tags and packed-refs live in
+// the common dir of the main repository, not in the worktree's gitDir. Classify
+// only knows root and gitDir, so ref changes made there (from another worktree, or
+// a fetch) are not reported unless the caller also watches the common dir and
+// maps those events itself. The worktree's own HEAD and index are reported.
 package watch
 
 import (
@@ -29,17 +39,25 @@ var caseInsensitive = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 // asked about worktree-relative slash paths only (never for paths in gitDir).
 //
 // FSEvents can coalesce changes into a directory path: a directory inside the
-// worktree (or root itself) counts as WIP, and a directory under refs/ as Refs.
+// worktree (or root itself) counts as WIP, a directory under refs/ as Refs, and
+// gitDir itself as Refs|WIP. config counts as Refs (remotes, upstreams);
+// rebase-merge/, rebase-apply/ and sequencer/ as Refs|WIP; info/exclude as WIP.
 func Classify(root, gitDir, path string, ignore func(rel string) bool) Kind {
 	if rel, ok := under(gitDir, path); ok {
 		if strings.HasSuffix(rel, ".lock") {
 			return 0
 		}
 		switch {
-		case rel == "index":
+		case rel == ".":
+			return Refs | WIP // coalesced event on the git dir itself
+		case rel == "index", rel == "info/exclude":
 			return WIP
 		case rel == "HEAD":
 			return Refs | WIP
+		case inDir(rel, "rebase-merge"), inDir(rel, "rebase-apply"), inDir(rel, "sequencer"):
+			return Refs | WIP // rebase / cherry-pick / revert in progress or finished
+		case rel == "config":
+			return Refs // upstreams, remotes
 		case rel == "packed-refs", rel == "FETCH_HEAD", rel == "ORIG_HEAD", rel == "MERGE_HEAD",
 			rel == "CHERRY_PICK_HEAD", rel == "REVERT_HEAD", rel == "REBASE_HEAD",
 			rel == "refs", strings.HasPrefix(rel, "refs/"):
@@ -62,6 +80,11 @@ func Classify(root, gitDir, path string, ignore func(rel string) bool) Kind {
 		return WIP
 	}
 	return 0
+}
+
+// inDir reports whether the slash path rel is dir or inside it.
+func inDir(rel, dir string) bool {
+	return rel == dir || strings.HasPrefix(rel, dir+"/")
 }
 
 // under returns p relative to base (slash separated, "." when equal) and whether
