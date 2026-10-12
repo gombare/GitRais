@@ -3,6 +3,7 @@ module gitrais
 go 1.26.0
 
 require (
+	github.com/fsnotify/fsevents v0.2.0
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/wailsapp/wails/v2 v2.16.0
 )
