@@ -105,7 +105,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
     let live = true;
     cache.ensure(start, end).then(
       (loaded) => {
-        if (warned.current === cache) warned.current = null; // fetching works again
+        if (loaded && warned.current === cache) warned.current = null; // a page really loaded again
         if (live && loaded) force((x) => x + 1);
       },
       (e) => {

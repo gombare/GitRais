@@ -40,7 +40,7 @@ export function drawGraph(
     if (r.hash === selected) {
       ctx.beginPath();
       ctx.arc(cx, cy, NODE_R + 3, 0, Math.PI * 2);
-      ctx.strokeStyle = '#ffffff';
+      ctx.strokeStyle = selectRing;
       ctx.stroke();
     }
   });
