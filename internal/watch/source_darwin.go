@@ -97,16 +97,31 @@ func dedupeRoots(paths []string) []string {
 	return roots
 }
 
-// cookieDir picks where Flush markers go: a root's .git directory when there is
-// one (never part of the worktree), else the last root (the git dir, when the
-// caller passes worktree root and git dir), else the only root.
+// cookieDir picks where Flush markers go: a root's .git directory, or a root
+// that is itself a git dir (contains HEAD). Markers never go into a worktree:
+// with no git dir among the roots it returns "" and Flush falls back to
+// FlushSync.
 func cookieDir(roots []string) string {
 	for _, r := range roots {
 		if fi, err := os.Stat(filepath.Join(r, ".git")); err == nil && fi.IsDir() {
 			return filepath.Join(r, ".git")
 		}
 	}
-	return roots[len(roots)-1]
+	for _, r := range roots {
+		if fi, err := os.Stat(filepath.Join(r, "HEAD")); err == nil && fi.Mode().IsRegular() {
+			return r
+		}
+	}
+	return ""
+}
+
+// sameDir compares directories the way the filesystem does: FSEvents reports
+// on-disk case, which may differ from the case of the path the repo was opened with.
+func sameDir(a, b string) bool {
+	if caseInsensitive {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // forceFlags mark events after which individual paths cannot be trusted: events
@@ -176,7 +191,7 @@ func (s *fseSource) forward(msg []fsevents.Event) bool {
 	paths := all[:0:0]
 	var seen []string
 	for _, p := range all {
-		if p != rescanAll && filepath.Dir(p) == s.cookieDir && strings.HasPrefix(filepath.Base(p), cookiePrefix) {
+		if p != rescanAll && s.cookieDir != "" && sameDir(filepath.Dir(p), s.cookieDir) && strings.HasPrefix(filepath.Base(p), cookiePrefix) {
 			seen = append(seen, p)
 			continue
 		}
@@ -192,9 +207,9 @@ func (s *fseSource) forward(msg []fsevents.Event) bool {
 	if len(seen) > 0 {
 		s.waitMu.Lock()
 		for _, p := range seen {
-			if ch, ok := s.waiters[p]; ok {
+			if ch, ok := s.waiters[filepath.Base(p)]; ok {
 				close(ch)
-				delete(s.waiters, p)
+				delete(s.waiters, filepath.Base(p))
 			}
 		}
 		s.waitMu.Unlock()
@@ -233,14 +248,18 @@ func (s *fseSource) Events() <-chan []string { return s.out }
 // and it gives up after flushTimeout. It returns early when the source is closed.
 // It must not be called from the goroutine that reads Events.
 func (s *fseSource) Flush() {
+	if s.cookieDir == "" {
+		s.flushSync()
+		return
+	}
 	name := filepath.Join(s.cookieDir, fmt.Sprintf("%s%d-%d", cookiePrefix, os.Getpid(), s.cookieSeq.Add(1)))
 	seen := make(chan struct{})
 	s.waitMu.Lock()
-	s.waiters[name] = seen
+	s.waiters[filepath.Base(name)] = seen
 	s.waitMu.Unlock()
 	defer func() {
 		s.waitMu.Lock()
-		delete(s.waiters, name)
+		delete(s.waiters, filepath.Base(name))
 		s.waitMu.Unlock()
 	}()
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,5 +200,35 @@ func waitFor(t *testing.T, ch chan Kind, want Kind, poke func(i int)) {
 		case <-deadline:
 			t.Fatalf("event %d not received within 3s", want)
 		}
+	}
+}
+
+func TestFSEventsFlushWithDifferentCaseRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("fsevents")
+	}
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("base")
+	root := strings.ToUpper(repo.Dir) // same directory on a case-insensitive volume
+	src, err := NewSource(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	go func() {
+		for range src.Events() {
+		}
+	}()
+	start := time.Now()
+	src.Flush()
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("Flush waited %v: marker event not matched", d)
+	}
+}
+
+func TestCookieDirNeverWorktree(t *testing.T) {
+	dir := t.TempDir()
+	if got := cookieDir([]string{dir}); got != "" {
+		t.Fatalf("cookieDir = %q, want \"\" for a plain directory", got)
 	}
 }
