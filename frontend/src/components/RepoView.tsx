@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useRepo } from '../store/repo';
+import { GraphView } from './GraphView';
 
 // Shell only: the toolbar, sidebars and graph panels arrive in Tasks 23-27.
 export function RepoView({ tab }: { tab: string }) {
@@ -11,7 +12,7 @@ export function RepoView({ tab }: { tab: string }) {
       <div className="toolbar-slot" />
       <div className="repo-body">
         <aside className="left-slot" />
-        <main className="center-slot" />
+        <main className="center-slot"><GraphView tab={tab} /></main>
         <aside className="right-slot" />
       </div>
     </div>
