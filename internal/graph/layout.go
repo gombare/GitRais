@@ -102,3 +102,8 @@ func (l *Layout) Next(c Commit) Placement {
 	}
 	return Placement{Lane: col, Color: color, Up: up, Down: down}
 }
+
+// clone returns an independent copy of the layout state.
+func (l *Layout) clone() Layout {
+	return Layout{lanes: append([]string(nil), l.lanes...), colors: append([]int(nil), l.colors...), next: l.next}
+}

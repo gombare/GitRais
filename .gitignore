@@ -4,3 +4,4 @@ build/git-src/
 node_modules/
 frontend/dist/
 frontend/test-results/
+build/bigrepo/

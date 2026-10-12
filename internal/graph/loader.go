@@ -48,29 +48,27 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 	var (
 		layout   Layout
 		batch    = make([]Row, 0, opt.Batch)
-		intern   = map[string]string{}
 		reported bool
 	)
-	in := func(s string) string {
-		if v, ok := intern[s]; ok {
-			return v
+	place := func(row Row) error {
+		if n := idx.Len() + len(batch); n%checkpointEvery == 0 {
+			idx.addCheckpoint(layout.clone())
 		}
-		s = strings.Clone(s) // do not keep the whole record alive
-		intern[s] = s
-		return s
-	}
-	place := func(row Row) {
+		// The index does not store the segments: Rows replays the layout from the checkpoints.
 		p := layout.Next(Commit{Hash: row.Hash, Parents: row.Parents})
-		row.Lane, row.Color, row.Up, row.Down = p.Lane, p.Color, p.Up, p.Down
+		row.Lane, row.Color = p.Lane, p.Color
 		batch = append(batch, row)
 		if len(batch) == opt.Batch {
-			idx.append(batch)
+			if err := idx.append(batch); err != nil {
+				return err
+			}
 			batch = batch[:0] // idx.append copies the rows: the slice can be reused
 			reported = true
 			if opt.OnProgress != nil {
 				opt.OnProgress(idx.Len())
 			}
 		}
+		return nil
 	}
 	args := append([]string{"log", "-z", "--topo-order", "--no-color", logFormat}, append(revs, "--")...)
 	err = r.Stream(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: gitexec.ReadOnlyEnv}, 0, func(rec []byte) error {
@@ -88,24 +86,29 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 		if perr != nil {
 			return fmt.Errorf("invalid timestamp in commit %s: %w", f[0], perr)
 		}
-		// strings.Clone: rows must not keep the whole record alive
+		// strings.Clone: the layout and its checkpoints keep parent hashes, they
+		// must not keep the whole record alive
 		parents := strings.Fields(f[1])
 		for i, p := range parents {
 			parents[i] = strings.Clone(p)
 		}
 		hash := strings.Clone(f[0])
 		for _, s := range stashByBase[hash] {
-			place(Row{Hash: s.Hash, Parents: []string{s.Base}, Kind: RowStash, StashRef: s.Ref,
-				Subject: s.Subject, Author: in(s.Author), Email: in(s.Email), Time: s.Time})
+			if err := place(Row{Hash: s.Hash, Parents: []string{s.Base}, Kind: RowStash, StashRef: s.Ref,
+				Subject: s.Subject, Author: s.Author, Email: s.Email, Time: s.Time}); err != nil {
+				return err
+			}
 		}
-		place(Row{Hash: hash, Parents: parents, Author: in(f[2]), Email: in(f[3]), Time: ts, Subject: strings.Clone(f[5])})
-		return nil
+		// The index copies subject, author and email: no clones needed.
+		return place(Row{Hash: hash, Parents: parents, Author: f[2], Email: f[3], Time: ts, Subject: f[5]})
 	})
 	if err != nil {
 		return err
 	}
 	if len(batch) > 0 {
-		idx.append(batch)
+		if err := idx.append(batch); err != nil {
+			return err
+		}
 		reported = false
 	}
 	if opt.OnProgress != nil && !reported {
