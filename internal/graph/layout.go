@@ -1,4 +1,4 @@
-// Package graph calcola il layout a corsie del grafo dei commit.
+// Package graph computes the lane layout of the commit graph.
 package graph
 
 type Seg struct{ From, To, Color uint16 }
@@ -14,13 +14,13 @@ type Placement struct {
 }
 
 type Layout struct {
-	lanes  []string // hash atteso per corsia; "" = libera
+	lanes  []string // expected hash per lane; "" = free
 	colors []int
 	next   int
 }
 
 func (l *Layout) alloc(hash string) int {
-	// I colori stanno in uint16 nei Seg: il contatore riparte da 0 così nodo e segmenti coincidono.
+	// Colors are uint16 in Seg: the counter wraps to 0 so node and segment colors agree.
 	color := l.next
 	l.next = (l.next + 1) & 0xFFFF
 	for i, h := range l.lanes {

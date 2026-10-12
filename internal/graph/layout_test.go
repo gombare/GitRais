@@ -16,7 +16,7 @@ func run(t *testing.T, commits []Commit, wants []want) {
 	for i, c := range commits {
 		p := l.Next(c)
 		w := wants[i]
-		strip := func(s []Seg) []Seg { // i test confrontano solo la geometria
+		strip := func(s []Seg) []Seg { // tests compare geometry only
 			out := []Seg{}
 			for _, x := range s {
 				out = append(out, Seg{From: x.From, To: x.To})
@@ -72,7 +72,7 @@ func TestOctopus(t *testing.T) {
 }
 
 func TestMergeIntoExistingLane(t *testing.T) {
-	// T2 e M condividono il parent P; M ha secondo parent P già atteso dalla corsia di T2.
+	// T2 and M share parent P; M's second parent P is already expected by T2's lane.
 	run(t, []Commit{{"T2", []string{"P"}}, {"M", []string{"Q", "P"}}, {"Q", []string{"P"}}, {"P", nil}}, []want{
 		{0, nil, []Seg{{0, 0, 0}}},
 		{1, []Seg{{0, 0, 0}}, []Seg{{0, 0, 0}, {1, 1, 0}, {1, 0, 0}}},
@@ -84,12 +84,12 @@ func TestMergeIntoExistingLane(t *testing.T) {
 func TestLaneReuseAndColors(t *testing.T) {
 	var l Layout
 	a := l.Next(Commit{"A", []string{"R"}})
-	b := l.Next(Commit{"B", nil}) // tip senza parent: occupa corsia 1 e la libera
+	b := l.Next(Commit{"B", nil}) // tip without parent: takes lane 1 and frees it
 	c := l.Next(Commit{"C", []string{"R"}})
 	if b.Lane != 1 || c.Lane != 1 {
-		t.Fatalf("lanes b=%d c=%d, want 1 and 1 (riuso)", b.Lane, c.Lane)
+		t.Fatalf("lanes b=%d c=%d, want 1 and 1 (reuse)", b.Lane, c.Lane)
 	}
 	if a.Color == b.Color || b.Color == c.Color {
-		t.Fatalf("colori non distinti: a=%d b=%d c=%d", a.Color, b.Color, c.Color)
+		t.Fatalf("colors not distinct: a=%d b=%d c=%d", a.Color, b.Color, c.Color)
 	}
 }

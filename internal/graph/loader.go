@@ -21,7 +21,9 @@ type LoadOptions struct {
 	OnProgress func(rows int)
 }
 
-const logFormat = "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"
+// With -z records are NUL-separated; %x1f separates fields and the subject is last,
+// so 0x1e/0x1f inside commit text stay in the subject.
+const logFormat = "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s"
 
 func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt LoadOptions) (err error) {
 	defer func() { idx.finish(err) }()
@@ -35,16 +37,20 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 	stashByBase := map[string][]Stash{}
 	for _, s := range opt.Stashes {
 		stashByBase[s.Base] = append(stashByBase[s.Base], s)
+		// the base may be unreachable from refs: include it so the stash row gets placed
+		revs = append(revs, s.Base)
 	}
 	var (
-		layout Layout
-		batch  = make([]Row, 0, opt.Batch)
-		intern = map[string]string{}
+		layout   Layout
+		batch    = make([]Row, 0, opt.Batch)
+		intern   = map[string]string{}
+		reported bool
 	)
 	in := func(s string) string {
 		if v, ok := intern[s]; ok {
 			return v
 		}
+		s = strings.Clone(s) // do not keep the whole record alive
 		intern[s] = s
 		return s
 	}
@@ -54,18 +60,18 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 		batch = append(batch, row)
 		if len(batch) == opt.Batch {
 			idx.append(batch)
-			batch = make([]Row, 0, opt.Batch)
+			batch = batch[:0] // idx.append copies the rows: the slice can be reused
+			reported = true
 			if opt.OnProgress != nil {
 				opt.OnProgress(idx.Len())
 			}
 		}
 	}
-	args := append([]string{"log", "--topo-order", "--no-color", logFormat}, revs...)
-	err = r.Stream(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: gitexec.ReadOnlyEnv}, 0x1e, func(rec []byte) error {
+	args := append([]string{"log", "-z", "--topo-order", "--no-color", logFormat}, revs...)
+	err = r.Stream(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: gitexec.ReadOnlyEnv}, 0, func(rec []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rec = bytes.TrimLeft(rec, "\n")
 		if len(rec) == 0 {
 			return nil
 		}
@@ -73,12 +79,21 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 		if len(f) != 6 {
 			return fmt.Errorf("unexpected git log record: %q", rec)
 		}
-		ts, _ := strconv.ParseInt(f[4], 10, 64)
-		for _, s := range stashByBase[f[0]] {
+		ts, perr := strconv.ParseInt(f[4], 10, 64)
+		if perr != nil {
+			return fmt.Errorf("invalid timestamp in commit %s: %w", f[0], perr)
+		}
+		// strings.Clone: rows must not keep the whole record alive
+		parents := strings.Fields(f[1])
+		for i, p := range parents {
+			parents[i] = strings.Clone(p)
+		}
+		hash := strings.Clone(f[0])
+		for _, s := range stashByBase[hash] {
 			place(Row{Hash: s.Hash, Parents: []string{s.Base}, Kind: RowStash, StashRef: s.Ref,
 				Subject: s.Subject, Author: in(s.Author), Email: in(s.Email), Time: s.Time})
 		}
-		place(Row{Hash: f[0], Parents: strings.Fields(f[1]), Author: in(f[2]), Email: in(f[3]), Time: ts, Subject: f[5]})
+		place(Row{Hash: hash, Parents: parents, Author: in(f[2]), Email: in(f[3]), Time: ts, Subject: strings.Clone(f[5])})
 		return nil
 	})
 	if err != nil {
@@ -86,8 +101,9 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 	}
 	if len(batch) > 0 {
 		idx.append(batch)
+		reported = false
 	}
-	if opt.OnProgress != nil {
+	if opt.OnProgress != nil && !reported {
 		opt.OnProgress(idx.Len())
 	}
 	return nil
