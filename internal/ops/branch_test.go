@@ -178,3 +178,81 @@ func TestNamesAreNeverOptions(t *testing.T) {
 		t.Fatal("repo state changed")
 	}
 }
+
+func TestLightweightTagWithGpgSign(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("base")
+	repo.Git("config", "tag.gpgSign", "true")
+	if err := CreateTag(bg, repo.R, repo.Dir, "v1", "HEAD", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.Git("cat-file", "-t", "v1"); strings.TrimSpace(got) != "commit" {
+		t.Fatalf("tag type = %q, want lightweight (commit)", got)
+	}
+}
+
+func TestCheckoutLocalDoesNotGuess(t *testing.T) {
+	a := testutil.NewRepo(t)
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "origin", "main:topic")
+	a.Git("fetch", "-q", "origin")
+	if err := Checkout(bg, a.R, a.Dir, CheckoutTarget{Kind: "local", Name: "topic"}); err == nil {
+		t.Fatal("local checkout of a missing branch succeeded")
+	}
+	if a.Git("branch", "--list", "topic") != "" {
+		t.Fatal("local branch was created by guessing")
+	}
+}
+
+func TestDeleteRemoteBranchWithSameNameTag(t *testing.T) {
+	a := testutil.NewRepo(t)
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "origin", "main:x")
+	a.Git("tag", "x")
+	a.Git("push", "-q", "origin", "refs/tags/x")
+	if err := DeleteRemoteBranch(bg, a.R, a.Dir, "origin", "x"); err != nil {
+		t.Fatal(err)
+	}
+	a.Git("fetch", "-q", "origin")
+	if a.Git("ls-remote", "--heads", "origin", "x") != "" {
+		t.Fatal("remote branch not deleted")
+	}
+	if a.Git("ls-remote", "--tags", "origin", "x") == "" {
+		t.Fatal("remote tag was deleted")
+	}
+}
+
+func TestBranchNameAtRejected(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("base")
+	if err := ValidateBranchName(bg, repo.R, repo.Dir, "@"); err == nil {
+		t.Fatal(`"@" accepted`)
+	}
+	if err := CreateBranch(bg, repo.R, repo.Dir, "@", "", false); err == nil {
+		t.Fatal(`create "@" accepted`)
+	}
+	if err := Checkout(bg, repo.R, repo.Dir, CheckoutTarget{Kind: "local", Name: "@"}); err == nil {
+		t.Fatal(`checkout "@" accepted`)
+	}
+}
+
+func TestCreateBranchEmptyStartIsHEAD(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	h := repo.CommitAll("base")
+	if err := CreateBranch(bg, repo.R, repo.Dir, "a", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(repo.Git("rev-parse", "a")) != strings.TrimSpace(h) {
+		t.Fatal("branch a not at HEAD")
+	}
+	if err := CreateBranch(bg, repo.R, repo.Dir, "b", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(repo.Git("branch", "--show-current")) != "b" {
+		t.Fatal("branch b not checked out")
+	}
+}

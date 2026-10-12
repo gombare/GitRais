@@ -16,9 +16,10 @@ func run(ctx context.Context, r *gitexec.Runner, dir string, args ...string) err
 
 // ValidateBranchName checks name with `git check-ref-format --branch`. Names
 // that start with "-" (would be parsed as options) or that use the "@{" syntax
-// (which --branch would expand, e.g. "@{-1}") are rejected up front.
+// (which --branch would expand, e.g. "@{-1}") are rejected up front, as is the
+// bare "@" (an alias for HEAD).
 func ValidateBranchName(ctx context.Context, r *gitexec.Runner, dir, name string) error {
-	if name == "" || strings.HasPrefix(name, "-") || strings.Contains(name, "@{") {
+	if name == "" || name == "@" || strings.HasPrefix(name, "-") || strings.Contains(name, "@{") {
 		return fmt.Errorf("invalid branch name: %q", name)
 	}
 	if _, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"check-ref-format", "--branch", name}, Env: gitexec.ReadOnlyEnv}); err != nil {
@@ -46,15 +47,22 @@ func validateRemoteName(remote string) error {
 	return nil
 }
 
-// CreateBranch creates branch name at start, optionally switching to it.
+// CreateBranch creates branch name at start, optionally switching to it. An
+// empty start means HEAD.
 func CreateBranch(ctx context.Context, r *gitexec.Runner, dir, name, start string, checkout bool) error {
 	if err := ValidateBranchName(ctx, r, dir, name); err != nil {
 		return err
 	}
+	var args []string
 	if checkout {
-		return run(ctx, r, dir, "switch", "-c", name, "--end-of-options", start)
+		args = []string{"switch", "-c", name, "--end-of-options"}
+	} else {
+		args = []string{"branch", "--end-of-options", name}
 	}
-	return run(ctx, r, dir, "branch", "--end-of-options", name, start)
+	if start != "" {
+		args = append(args, start)
+	}
+	return run(ctx, r, dir, args...)
 }
 
 // RenameBranch renames a local branch.
@@ -88,7 +96,7 @@ func DeleteRemoteBranch(ctx context.Context, r *gitexec.Runner, dir, remote, bra
 	if err := ValidateBranchName(ctx, r, dir, branch); err != nil {
 		return err
 	}
-	return run(ctx, r, dir, "push", "--delete", "--end-of-options", remote, branch)
+	return run(ctx, r, dir, "push", "--delete", "--end-of-options", remote, "refs/heads/"+branch)
 }
 
 // SetUpstream sets the upstream of a local branch (e.g. "origin/main").
@@ -111,13 +119,18 @@ type CheckoutTarget struct {
 // Checkout switches to a local branch, a remote branch (creating a tracking
 // branch unless a local one with the same short name exists) or a commit
 // (detached HEAD).
+//
+// Kind "local" never guesses: a missing local branch is an error even when a
+// remote branch of that name exists (use Kind "remote" for that). A remote
+// checkout switches to an existing local branch of the same short name even if
+// it tracks a different upstream, and does not fast-forward it.
 func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarget) error {
 	switch t.Kind {
 	case "local":
 		if err := ValidateBranchName(ctx, r, dir, t.Name); err != nil {
 			return err
 		}
-		return run(ctx, r, dir, "switch", "--end-of-options", t.Name)
+		return run(ctx, r, dir, "switch", "--no-guess", "--end-of-options", t.Name)
 	case "commit":
 		if t.Name == "" || strings.HasPrefix(t.Name, "-") {
 			return fmt.Errorf("invalid commit: %q", t.Name)
@@ -177,7 +190,7 @@ func CreateTag(ctx context.Context, r *gitexec.Runner, dir, name, target, messag
 			Stdin: strings.NewReader(message)})
 		return err
 	}
-	return run(ctx, r, dir, "tag", "--end-of-options", name, target)
+	return run(ctx, r, dir, "tag", "--no-sign", "--end-of-options", name, target)
 }
 
 // DeleteTag deletes a local tag.
