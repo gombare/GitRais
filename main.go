@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"log"
 
@@ -23,8 +24,8 @@ func main() {
 		MinWidth:    900,
 		MinHeight:   600,
 		AssetServer: &assetserver.Options{Assets: assets},
-		OnStartup:   a.Startup,
-		OnShutdown:  a.Shutdown,
+		OnStartup:   func(ctx context.Context) { app.Startup(a, ctx) },
+		OnShutdown:  func(ctx context.Context) { app.Shutdown(a, ctx) },
 		Bind:        []interface{}{a},
 	})
 	if err != nil {
