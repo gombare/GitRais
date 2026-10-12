@@ -142,3 +142,21 @@ func TestParseNewEmptyFileAndInvalidHunk(t *testing.T) {
 		t.Fatal("expected error for invalid hunk header")
 	}
 }
+
+func TestParseCombinedDiff(t *testing.T) {
+	in := "diff --git a/0.txt b/0.txt\nindex 1..2 100644\n--- a/0.txt\n+++ b/0.txt\n@@ -1 +1 @@\n-x\n+y\n" +
+		"diff --cc a.txt\nindex 3,4..0000000\n--- a/a.txt\n+++ b/a.txt\n@@@ -1,1 -1,1 +1,5 @@@\n++<<<<<<< HEAD\n + ours\n++=======\n+ theirs\n++>>>>>>> side\n"
+	files, err := Parse([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("files = %+v", files)
+	}
+	if f := files[0]; f.NewPath != "0.txt" || len(f.Hunks) != 1 {
+		t.Fatalf("first file corrupted: %+v", f)
+	}
+	if f := files[1]; f.NewPath != "a.txt" || f.Status != "U" || len(f.Hunks) != 0 {
+		t.Fatalf("combined file = %+v", f)
+	}
+}

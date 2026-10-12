@@ -2,7 +2,9 @@
 //
 // Parse expects the default git output (core.quotePath on): paths with special
 // characters appear as C-style quoted strings ("a/caf\303\251.txt"), which are
-// unquoted here. Output produced with -z is not supported.
+// unquoted here. Output produced with -z is not supported. Paths must use the
+// a/ and b/ prefixes: callers pass --src-prefix=a/ --dst-prefix=b/ so user
+// settings like diff.noprefix or diff.mnemonicPrefix don't change them.
 package diff
 
 import (
@@ -69,6 +71,7 @@ func Parse(data []byte) ([]FileDiff, error) {
 		hunk             *Hunk
 		oldLeft, newLeft int
 		oldNo, newNo     int
+		combined         bool
 	)
 	for _, ln := range strings.Split(text, "\n") {
 		if hunk != nil {
@@ -104,7 +107,18 @@ func Parse(data []byte) ([]FileDiff, error) {
 			}
 			hunk = nil
 		}
+		if combined && !strings.HasPrefix(ln, "diff ") {
+			continue
+		}
+		combined = false
 		switch {
+		case strings.HasPrefix(ln, "diff --cc "), strings.HasPrefix(ln, "diff --combined "):
+			// Combined diffs (unmerged paths) can't be staged hunk by hunk: report the
+			// path as conflicted ("U") without hunks and skip its body.
+			_, path, _ := strings.Cut(ln[len("diff --"):], " ")
+			path = unquote(path)
+			files = append(files, FileDiff{OldPath: path, NewPath: path, Status: "U", Hunks: []Hunk{}})
+			cur, combined = nil, true
 		case strings.HasPrefix(ln, "diff --git "):
 			files = append(files, FileDiff{Status: "M", Hunks: []Hunk{}})
 			cur = &files[len(files)-1]
