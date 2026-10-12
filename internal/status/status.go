@@ -71,10 +71,11 @@ func Parse(data []byte) (Status, error) {
 			s.Files = append(s.Files, FileStatus{Path: p[9], OrigPath: tok[i], Index: p[1][:1], WorkTree: p[1][1:]})
 		case 'u':
 			p := strings.SplitN(e, " ", 11)
-			if len(p) != 11 || p[10] == "" {
+			if len(p) != 11 || len(p[1]) != 2 || p[10] == "" {
 				return s, fmt.Errorf("status: malformed entry %q", e)
 			}
-			s.Files = append(s.Files, FileStatus{Path: p[10], Index: "U", WorkTree: "U", Conflicted: true})
+			// keep the real conflict code (AA, DU, UD, ...) so the UI can offer the right resolution
+			s.Files = append(s.Files, FileStatus{Path: p[10], Index: p[1][:1], WorkTree: p[1][1:], Conflicted: true})
 		case '?':
 			if len(e) < 3 || e[1] != ' ' {
 				return s, fmt.Errorf("status: malformed entry %q", e)

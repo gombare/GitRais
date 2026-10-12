@@ -95,3 +95,22 @@ func TestReadNewDirAndSpecialNames(t *testing.T) {
 		t.Fatalf("%+v", s.Files)
 	}
 }
+
+func TestParseKeepsConflictCode(t *testing.T) {
+	z := "0000000000000000000000000000000000000000"
+	data := "u AA N... 000000 100644 100644 100644 " + z + " " + z + " " + z + " both.txt\x00" +
+		"u UD N... 100644 100644 000000 100644 " + z + " " + z + " " + z + " gone.txt\x00"
+	s, err := Parse([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Files) != 2 {
+		t.Fatalf("files = %+v", s.Files)
+	}
+	for i, want := range []string{"AA", "UD"} {
+		f := s.Files[i]
+		if got := f.Index + f.WorkTree; got != want || !f.Conflicted {
+			t.Fatalf("file %d: code %q conflicted=%v, want %q", i, got, f.Conflicted, want)
+		}
+	}
+}
