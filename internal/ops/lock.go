@@ -72,9 +72,9 @@ func RemoveIndexLock(ctx context.Context, gitDir string) error {
 	var ee *exec.ExitError
 	switch {
 	case err == nil:
-	case errors.As(err, &ee) && len(bytes.TrimSpace(out)) == 0 && stderr.Len() == 0:
+	case errors.As(err, &ee) && ee.ExitCode() == 1 && len(bytes.TrimSpace(out)) == 0 && stderr.Len() == 0:
 		// lsof exits 1 without output when no process has the file open.
-	case errors.As(err, &ee) && len(bytes.TrimSpace(out)) > 0:
+	case errors.As(err, &ee) && ee.ExitCode() == 1 && len(bytes.TrimSpace(out)) > 0:
 	default:
 		if ctx.Err() != nil {
 			return ctx.Err()
