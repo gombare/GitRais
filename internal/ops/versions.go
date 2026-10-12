@@ -47,7 +47,8 @@ const binaryProbe = 8000
 
 // ErrInvalidFilePath is returned for a path that is not a plain path relative
 // to the repository root (absolute, "..", ".", empty components, NUL or
-// newline), or that crosses a symbolic link.
+// newline), that has a ".git" component (any case), or that crosses a
+// symbolic link.
 var ErrInvalidFilePath = errors.New("invalid file path")
 
 var fullHashRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
@@ -111,13 +112,15 @@ func FileVersions(ctx context.Context, r *gitexec.Runner, dir string, req Versio
 }
 
 // checkRelPath accepts only clean, slash-separated paths relative to the
-// repository root, as reported by git status and diff.
+// repository root, as reported by git status and diff. A ".git" component
+// in any case is refused: git never tracks one, and on case-insensitive
+// filesystems ".GIT" is the repository's own directory.
 func checkRelPath(p string) error {
 	if p == "" || strings.ContainsAny(p, "\x00\n\r") || strings.HasPrefix(p, "/") {
 		return fmt.Errorf("%w: %q", ErrInvalidFilePath, p)
 	}
 	for _, c := range strings.Split(p, "/") {
-		if c == "" || c == "." || c == ".." {
+		if c == "" || c == "." || c == ".." || strings.EqualFold(c, ".git") {
 			return fmt.Errorf("%w: %q", ErrInvalidFilePath, p)
 		}
 	}

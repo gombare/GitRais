@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gitrais/internal/diff"
 	"gitrais/internal/gitexec"
 	"gitrais/internal/gitread"
 	"gitrais/internal/graph"
@@ -189,6 +190,76 @@ func TestStageLines(t *testing.T) {
 	repo.Git("add", "new.txt")
 	if err := s.StageLines(bg, StageLinesRequest{Path: "new.txt", Staged: true, Hunk: 0}); !errors.Is(err, ErrPartialStageUnsupported) {
 		t.Fatalf("added file: err = %v", err)
+	}
+}
+
+// fingerprint builds the Expect of a StageLinesRequest from a loaded diff.
+func fingerprint(fd *diff.FileDiff, hunk int, lines []int) *HunkFingerprint {
+	h := fd.Hunks[hunk]
+	fp := &HunkFingerprint{OldStart: h.OldStart, OldLines: h.OldLines, NewStart: h.NewStart, NewLines: h.NewLines}
+	idx := lines
+	if len(idx) == 0 {
+		for i := range h.Lines {
+			idx = append(idx, i)
+		}
+	}
+	for _, i := range idx {
+		fp.Lines = append(fp.Lines, FingerprintLine{Kind: string(h.Lines[i].Kind), Text: h.Lines[i].Text})
+	}
+	return fp
+}
+
+func TestStageLinesFingerprint(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("f.txt", "a\nb\nc\n")
+	repo.CommitAll("base")
+	repo.Write("f.txt", "a\nB\nc\nd\n")
+	s, _ := open(t, repo)
+	fd, err := s.WipDiff(bg, ops.WipDiffRequest{Path: "f.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addB := -1
+	for i, l := range fd.Hunks[0].Lines {
+		if l.Kind == "+" && l.Text == "B" {
+			addB = i
+		}
+	}
+	// The file changes after the diff was loaded: same hunk shape, different text.
+	repo.Write("f.txt", "a\nX\nc\nd\n")
+	before := repo.Git("ls-files", "-s", "f.txt")
+	err = s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 0, Lines: []int{addB}, Expect: fingerprint(&fd, 0, []int{addB})})
+	if !errors.Is(err, ErrDiffChanged) {
+		t.Fatalf("changed file: err = %v", err)
+	}
+	if err := s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 0, Expect: fingerprint(&fd, 0, nil)}); !errors.Is(err, ErrDiffChanged) {
+		t.Fatalf("changed file, whole hunk: err = %v", err)
+	}
+	if got := repo.Git("ls-files", "-s", "f.txt"); got != before {
+		t.Fatalf("index changed: %q -> %q", before, got)
+	}
+	// A fresh load with a matching fingerprint stages.
+	fd, err = s.WipDiff(bg, ops.WipDiffRequest{Path: "f.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	addX := -1
+	for i, l := range fd.Hunks[0].Lines {
+		if l.Kind == "+" && l.Text == "X" {
+			addX = i
+		}
+	}
+	if err := s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 0, Lines: []int{addX}, Expect: fingerprint(&fd, 0, []int{addX})}); err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.Git("diff", "--cached", "--numstat"); got != "1\t0\tf.txt" {
+		t.Fatalf("staged = %q", got)
+	}
+	// A fingerprint with a different line count is a mismatch too.
+	fp := fingerprint(&fd, 0, nil)
+	fp.Lines = fp.Lines[:1]
+	if err := s.StageLines(bg, StageLinesRequest{Path: "f.txt", Hunk: 0, Expect: fp}); !errors.Is(err, ErrDiffChanged) {
+		t.Fatalf("short fingerprint: err = %v", err)
 	}
 }
 

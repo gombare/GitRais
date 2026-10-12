@@ -29,6 +29,7 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   InvalidHash: ['Hash non valido', 'L’hash del commit non è valido.', null],
   PartialStageUnsupported: ['Stage parziale non supportato', 'Questo file non supporta lo stage di singole righe.', null],
   HunkOutOfRange: ['Hunk non valido', 'L’hunk selezionato non esiste più: aggiorna il diff.', null],
+  DiffChanged: ['Diff cambiato', 'Il file è cambiato da quando è stato mostrato: il diff è stato aggiornato, riprova.', null],
   LineOutOfRange: ['Riga non valida', 'La riga selezionata non esiste più: aggiorna il diff.', null],
   NoLinesSelected: ['Nessuna riga selezionata', 'Seleziona almeno una riga.', null],
   NoBranch: ['Nessuna branch', 'HEAD non è su una branch.', null],

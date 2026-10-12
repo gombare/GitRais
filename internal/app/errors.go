@@ -52,6 +52,7 @@ var sentinelKinds = []struct {
 	{session.ErrInvalidHash, "InvalidHash"},
 	{session.ErrPartialStageUnsupported, "PartialStageUnsupported"},
 	{session.ErrHunkOutOfRange, "HunkOutOfRange"},
+	{session.ErrDiffChanged, "DiffChanged"},
 	{session.ErrLineOutOfRange, "LineOutOfRange"},
 	{session.ErrNoLinesSelected, "NoLinesSelected"},
 	{session.ErrNoBranch, "NoBranch"},

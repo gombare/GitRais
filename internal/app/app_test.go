@@ -259,6 +259,7 @@ func TestUIErrorKinds(t *testing.T) {
 		{session.ErrInvalidHash, "InvalidHash"},
 		{session.ErrPartialStageUnsupported, "PartialStageUnsupported"},
 		{session.ErrHunkOutOfRange, "HunkOutOfRange"},
+		{session.ErrDiffChanged, "DiffChanged"},
 		{session.ErrLineOutOfRange, "LineOutOfRange"},
 		{session.ErrNoLinesSelected, "NoLinesSelected"},
 		{session.ErrNoBranch, "NoBranch"},

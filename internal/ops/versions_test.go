@@ -114,7 +114,7 @@ func TestFileVersionsPathSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, p := range []string{"../x", "a/../../x", "/etc/passwd", "", "./a.txt", "a.txt\nHEAD:a.txt", "linkdir/secret.txt", "a\x00b"} {
+	for _, p := range []string{"../x", "a/../../x", "/etc/passwd", "", "./a.txt", "a.txt\nHEAD:a.txt", "linkdir/secret.txt", "a\x00b", ".git/config", ".GIT/config", "sub/.Git/HEAD", ".git"} {
 		if _, err := FileVersions(bg, repo.R, repo.Dir, VersionsRequest{Path: p, Untracked: true}); err == nil {
 			t.Errorf("path %q accepted", p)
 		}

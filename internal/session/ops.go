@@ -25,6 +25,9 @@ var (
 	// ErrNoLinesSelected is returned by StageLines when the selection holds no
 	// added or removed line.
 	ErrNoLinesSelected = errors.New("no changed lines selected")
+	// ErrDiffChanged is returned by StageLines when the hunk no longer matches
+	// the fingerprint the frontend sent: the file changed since it was shown.
+	ErrDiffChanged = errors.New("the diff changed since it was shown, reload it")
 	// ErrNoBranch is returned by PushCurrent with a detached or unborn HEAD.
 	ErrNoBranch = errors.New("no current branch to push")
 	// ErrNoRemote is returned by PushCurrent when no remote is configured.
@@ -42,6 +45,50 @@ type StageLinesRequest struct {
 	Staged bool   `json:"staged"`
 	Hunk   int    `json:"hunk"`
 	Lines  []int  `json:"lines"` // empty = whole hunk
+	// Expect, when set, must match the re-read hunk or nothing is staged
+	// (ErrDiffChanged). The frontend always sends it.
+	Expect *HunkFingerprint `json:"expect,omitempty"`
+}
+
+// HunkFingerprint is what the frontend saw of the hunk being staged: its
+// header and, for each index in Lines (or each hunk line when Lines is
+// empty), in the same order, the line's kind and text.
+type HunkFingerprint struct {
+	OldStart int               `json:"oldStart"`
+	OldLines int               `json:"oldLines"`
+	NewStart int               `json:"newStart"`
+	NewLines int               `json:"newLines"`
+	Lines    []FingerprintLine `json:"lines"`
+}
+
+// FingerprintLine is the kind ("+", "-", " " or "\") and text of a hunk line.
+type FingerprintLine struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
+
+// matches reports whether h, with the selected line indexes (all lines when
+// empty, already range checked), is the hunk the fingerprint describes.
+func (fp *HunkFingerprint) matches(h diff.Hunk, lines []int) bool {
+	if fp.OldStart != h.OldStart || fp.OldLines != h.OldLines || fp.NewStart != h.NewStart || fp.NewLines != h.NewLines {
+		return false
+	}
+	idx := lines
+	if len(idx) == 0 {
+		idx = make([]int, len(h.Lines))
+		for i := range idx {
+			idx[i] = i
+		}
+	}
+	if len(fp.Lines) != len(idx) {
+		return false
+	}
+	for k, i := range idx {
+		if fp.Lines[k].Kind != string(h.Lines[i].Kind) || fp.Lines[k].Text != h.Lines[i].Text {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Session) Stage(ctx context.Context, paths []string) error {
@@ -65,7 +112,9 @@ func (s *Session) Discard(ctx context.Context, tracked, untracked []string) erro
 }
 
 // StageLines stages or unstages part of a modified file. The diff is re-read
-// under the write lock, so the indices must match the current state.
+// under the write lock, so the indices must match the current state, and the
+// hunk is checked against req.Expect so a file changed since the frontend
+// loaded its diff is never staged by stale indices.
 func (s *Session) StageLines(ctx context.Context, req StageLinesRequest) error {
 	return s.write(ctx, false, func(c context.Context) error {
 		fd, err := ops.WipDiff(c, s.r, s.Dir, ops.WipDiffRequest{Path: req.Path, Staged: req.Staged})
@@ -88,6 +137,9 @@ func (s *Session) StageLines(ctx context.Context, req StageLinesRequest) error {
 				}
 				sel[req.Hunk][l] = true
 			}
+		}
+		if req.Expect != nil && !req.Expect.matches(fd.Hunks[req.Hunk], req.Lines) {
+			return ErrDiffChanged
 		}
 		mode, reverse := diff.ForStage, false
 		if req.Staged {
