@@ -17,6 +17,8 @@ export type RepoState = {
   graphVersion: number;
   selection: Selection;
   diff: DiffTarget | null;
+  // Set by jump(): the graph scrolls to `row`; `n` makes repeated jumps to the same row distinct.
+  scrollRequest?: { row: number; n: number };
 };
 
 const empty = (): RepoState => ({
@@ -34,6 +36,8 @@ type RepoStore = {
   graphReset(tab: string): void;
   select(tab: string, sel: Selection): void;
   openDiff(tab: string, d: DiffTarget | null): void;
+  // Selects the commit and asks the graph to scroll to it (selection only, no scroll, if the commit is not in the graph).
+  jump(tab: string, hash: string): Promise<void>;
 };
 
 export const useRepo = create<RepoStore>((set, get) => ({
@@ -87,5 +91,15 @@ export const useRepo = create<RepoStore>((set, get) => ({
   },
   openDiff(tab, diff) {
     get().patch(tab, { diff });
+  },
+  async jump(tab, hash) {
+    let row = -1;
+    try {
+      row = await api.FindRow(tab, hash);
+    } catch (e) {
+      useApp.getState().toast(e, tab);
+      return;
+    }
+    get().patch(tab, { selection: { kind: 'commit', hash }, diff: null, ...(row >= 0 ? { scrollRequest: { row, n: Date.now() } } : {}) });
   },
 }));

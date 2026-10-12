@@ -5,6 +5,8 @@ import { TabBar } from './components/TabBar';
 import { Welcome } from './components/Welcome';
 import { Toasts } from './components/Toasts';
 import { RepoView } from './components/RepoView';
+import { DialogHost } from './components/Dialogs';
+import { ContextMenuHost } from './components/ContextMenu';
 
 export default function App() {
   const active = useApp((s) => s.active);
@@ -24,6 +26,8 @@ export default function App() {
       ))}
       {active === null && <Welcome />}
       <Toasts />
+      <DialogHost />
+      <ContextMenuHost />
     </div>
   );
 }

@@ -1,0 +1,68 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { askText, confirmAction, DialogHost } from './Dialogs';
+
+afterEach(cleanup);
+
+describe('Dialogs', () => {
+  it('confirm: Enter on the focused OK confirms, focus returns to the opener', async () => {
+    render(<><button>opener</button><DialogHost /></>);
+    const opener = screen.getByText('opener');
+    opener.focus();
+    let p!: Promise<boolean>;
+    act(() => { p = confirmAction({ title: 'T', message: 'M', danger: true }); });
+    const ok = screen.getByRole('button', { name: 'OK' });
+    expect(document.activeElement).toBe(ok);
+    await act(async () => { fireEvent.click(ok); });
+    await expect(p).resolves.toBe(true);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+  it('confirm: Escape cancels', async () => {
+    render(<DialogHost />);
+    let p!: Promise<boolean>;
+    act(() => { p = confirmAction({ title: 'T', message: 'M' }); });
+    await act(async () => { fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' }); });
+    await expect(p).resolves.toBe(false);
+  });
+  it('text: Enter submits the trimmed value, empty value is not accepted', async () => {
+    render(<DialogHost />);
+    let p!: Promise<string | null>;
+    act(() => { p = askText({ title: 'T', label: 'Nome', initial: '' }); });
+    const input = screen.getByLabelText('Nome') as HTMLInputElement;
+    expect(document.activeElement).toBe(input);
+    expect((screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '  feat  ' } });
+    await act(async () => { fireEvent.submit(input.closest('form')!); });
+    await expect(p).resolves.toBe('feat');
+  });
+  it('text: Escape resolves null; backdrop click cancels', async () => {
+    render(<DialogHost />);
+    let p!: Promise<string | null>;
+    act(() => { p = askText({ title: 'T', label: 'Nome', initial: 'x' }); });
+    await act(async () => { fireEvent.keyDown(screen.getByLabelText('Nome'), { key: 'Escape' }); });
+    await expect(p).resolves.toBeNull();
+    act(() => { p = askText({ title: 'T', label: 'Nome', initial: 'x' }); });
+    await act(async () => { fireEvent.mouseDown(document.querySelector('.modal-backdrop')!); });
+    await expect(p).resolves.toBeNull();
+  });
+  it('traps Tab inside the dialog', () => {
+    render(<><button>outside</button><DialogHost /></>);
+    act(() => { void confirmAction({ title: 'T', message: 'M' }); });
+    const ok = screen.getByRole('button', { name: 'OK' });
+    const cancel = screen.getByRole('button', { name: 'Annulla' });
+    ok.focus();
+    fireEvent.keyDown(ok, { key: 'Tab' });
+    expect(document.activeElement).toBe(cancel); // wraps from last to first
+    fireEvent.keyDown(cancel, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(ok);
+  });
+  it('a new dialog cancels the one still open', async () => {
+    render(<DialogHost />);
+    let a!: Promise<boolean>;
+    act(() => { a = confirmAction({ title: '1', message: 'm' }); });
+    act(() => { void confirmAction({ title: '2', message: 'm' }); });
+    await expect(a).resolves.toBe(false);
+  });
+});
