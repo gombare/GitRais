@@ -52,7 +52,7 @@ func ReadCommit(ctx context.Context, r *gitexec.Runner, repo *git.Repository, di
 	msg := strings.TrimRight(c.Message, "\n")
 	summary, body, _ := strings.Cut(msg, "\n")
 	d := CommitDetail{
-		Hash: c.Hash.String(), Summary: summary, Body: strings.TrimSpace(body),
+		Hash: c.Hash.String(), Summary: summary, Body: strings.TrimLeft(body, "\n"),
 		Author: c.Author.Name, AuthorEmail: c.Author.Email, AuthorTime: c.Author.When.Unix(),
 		Committer: c.Committer.Name, CommitterEmail: c.Committer.Email, CommitTime: c.Committer.When.Unix(),
 		Parents: []string{},
@@ -82,11 +82,11 @@ func EmptyTree(ctx context.Context, r *gitexec.Runner, dir string) (string, erro
 // --name-status and --numstat. Both use -z, so paths are never quoted.
 func ChangedFiles(ctx context.Context, r *gitexec.Runner, dir, from, to string) ([]FileChange, error) {
 	base := []string{"diff", "--no-color", "--no-ext-diff", "-M", "-z"}
-	ns, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: append(append([]string{}, base...), "--name-status", from, to)})
+	ns, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: append(append([]string{}, base...), "--name-status", "--end-of-options", from, to, "--")})
 	if err != nil {
 		return nil, err
 	}
-	num, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: append(append([]string{}, base...), "--numstat", from, to)})
+	num, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: append(append([]string{}, base...), "--numstat", "--end-of-options", from, to, "--")})
 	if err != nil {
 		return nil, err
 	}

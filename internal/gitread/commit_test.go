@@ -2,6 +2,8 @@ package gitread
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -79,5 +81,18 @@ func TestChangedFilesUnusualPaths(t *testing.T) {
 	}
 	if _, ok := by["quote\"d.txt"]; !ok {
 		t.Fatalf("files = %+v", files)
+	}
+}
+
+func TestChangedFilesRejectsOptionRevs(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("a.txt", "a\n")
+	repo.CommitAll("one")
+	out := filepath.Join(t.TempDir(), "leak")
+	if _, err := ChangedFiles(context.Background(), repo.R, repo.Dir, "--output="+out, "HEAD"); err == nil {
+		t.Fatal("expected an error for an option-like rev")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatal("git wrote the --output file")
 	}
 }
