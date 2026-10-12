@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"gitrais/internal/askpass"
 	"gitrais/internal/gitexec"
 	"gitrais/internal/graph"
 	"gitrais/internal/ops"
@@ -623,5 +625,128 @@ func TestInitAndClone(t *testing.T) {
 	}
 	if err := a.CancelClone(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRestoreTabsShutdownRaceKeepsSavedTabs(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	var repos []*testutil.Repo
+	for i := 0; i < 3; i++ {
+		r := testutil.NewRepo(t)
+		r.CommitAll("x")
+		repos = append(repos, r)
+		if _, err := a.OpenRepo(r.Dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.shutdown()
+	b, err := NewWithConfig(Config{StatePath: a.cfg.StatePath, LogPath: a.cfg.LogPath, Git: a.cfg.Git})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.runner.Env = append(b.runner.Env, repos[0].R.Env...)
+	b.emitFn = func(string, any) {}
+	first := true
+	b.beforeRestoreOpen = func(string) { // shutdown lands while restoring
+		if first {
+			first = false
+			b.shutdown()
+		}
+	}
+	if _, err := b.RestoreTabs(); err == nil || decodeUIError(t, err).Kind != "Cancelled" {
+		t.Fatalf("RestoreTabs during shutdown = %v", err)
+	}
+	st, err := b.store.Load()
+	if err != nil || len(st.Tabs) != 3 {
+		t.Fatalf("saved tabs after raced restore = %+v %v", st.Tabs, err)
+	}
+}
+
+func TestOpenRepoRejectsInvalidPaths(t *testing.T) {
+	a, _, _ := newTestApp(t)
+	for _, p := range []string{"", "relative/dir"} {
+		if _, err := a.OpenRepo(p); decodeUIError(t, err).Kind != "InvalidPath" {
+			t.Fatalf("OpenRepo(%q) = %v", p, err)
+		}
+	}
+}
+
+func TestRowsClampsRange(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("x")
+	repo.Write("b.txt", "b")
+	repo.CommitAll("y")
+	tab, _ := a.OpenRepo(repo.Dir)
+	waitGraph(t, a, tab.ID, 2)
+	for _, c := range [][2]int{{1, math.MaxInt}, {0, math.MaxInt}, {-5, 1}, {0, -3}, {math.MaxInt, math.MaxInt}} {
+		if _, err := a.Rows(tab.ID, c[0], c[1]); err != nil {
+			t.Fatalf("Rows(%d,%d): %v", c[0], c[1], err)
+		}
+	}
+	rows, _ := a.Rows(tab.ID, -5, 1)
+	if len(rows) != 1 {
+		t.Fatalf("negative start must act as 0: %d rows", len(rows))
+	}
+}
+
+func TestShutdownClosesAskpassAfterSessions(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("x")
+	tab, _ := a.OpenRepo(repo.Dir)
+	s, _ := a.sess(tab.ID)
+	ap, aerr := askpass.Start(a.askHandler)
+	if aerr != nil {
+		t.Fatal(aerr)
+	}
+	a.ap = ap
+	var err error
+	called := false
+	a.beforeAskpassClose = func() {
+		called = true
+		err = s.StageAll(context.Background())
+	}
+	a.shutdown()
+	if !called {
+		t.Fatal("askpass close hook not called")
+	}
+	if !errors.Is(err, session.ErrClosed) {
+		t.Fatalf("askpass server closed before the session: %v", err)
+	}
+}
+
+func TestTabBindingsAfterShutdownAreCancelled(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("x")
+	tab, _ := a.OpenRepo(repo.Dir)
+	a.shutdown()
+	if _, err := a.Status(tab.ID); decodeUIError(t, err).Kind != "Cancelled" {
+		t.Fatalf("Status after shutdown = %v", err)
+	}
+	if err := a.Stage(tab.ID, nil); decodeUIError(t, err).Kind != "Cancelled" {
+		t.Fatalf("Stage after shutdown = %v", err)
+	}
+}
+
+func TestAuthTimeoutStartsWhenShown(t *testing.T) {
+	a, ev, _ := newTestApp(t)
+	a.authTimeoutOverride = 400 * time.Millisecond
+	type res struct{ ok bool }
+	r1, r2 := make(chan res, 1), make(chan res, 1)
+	go func() { _, ok := a.askHandler(t.Context(), "Username: "); r1 <- res{ok} }()
+	first := waitPrompt(t, ev, 1)
+	go func() { _, ok := a.askHandler(t.Context(), "Password: "); r2 <- res{ok} }()
+	time.Sleep(250 * time.Millisecond)
+	a.AnswerAuth(first.ID, "u", true)
+	<-r1
+	second := waitPrompt(t, ev, 2)
+	time.Sleep(250 * time.Millisecond) // 500 ms since queued, 250 ms since shown
+	a.AnswerAuth(second.ID, "pw", true)
+	select {
+	case r := <-r2:
+		if !r.ok {
+			t.Fatal("queued prompt timed out while waiting for its turn")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt not answered")
 	}
 }

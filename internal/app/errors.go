@@ -22,8 +22,9 @@ type UIError struct {
 }
 
 var (
-	errNoTab      = errors.New("repository tab not found")
-	errGitMissing = errors.New("the bundled git was not found: repository operations are unavailable")
+	errNoTab       = errors.New("repository tab not found")
+	errGitMissing  = errors.New("the bundled git was not found: repository operations are unavailable")
+	errInvalidPath = errors.New("the path must be absolute and non-empty")
 )
 
 // sentinelKinds maps backend sentinel errors to UIError kinds. It is checked
@@ -34,6 +35,7 @@ var sentinelKinds = []struct {
 }{
 	{errNoTab, "NoTab"},
 	{errGitMissing, "GitMissing"},
+	{errInvalidPath, "InvalidPath"},
 	{ops.ErrEmptyMessage, "EmptyMessage"},
 	{ops.ErrNothingToCommit, "NothingToCommit"},
 	{ops.ErrNothingToAmend, "NothingToAmend"},

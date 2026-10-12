@@ -24,6 +24,15 @@ type authAnswer struct {
 type authReq struct {
 	p  AuthPrompt
 	ch chan authAnswer // buffered (1): AnswerAuth never blocks
+	// shown is closed when the prompt becomes the head of the queue; the
+	// timeout runs from then on, not while it waits behind other prompts.
+	shown chan struct{}
+}
+
+// showLocked emits the prompt and starts its timeout. authMu must be held.
+func (a *App) showLocked(req *authReq) {
+	a.emit(EventAuthPrompt, req.p)
+	close(req.shown)
 }
 
 // isSecret reports whether the prompt asks for a secret (the input must be
@@ -40,7 +49,7 @@ func isSecret(prompt string) bool {
 // emitted so the frontend closes the dialog. Prompts and answers are never
 // logged.
 func (a *App) askHandler(ctx context.Context, prompt string) (string, bool) {
-	req := &authReq{p: AuthPrompt{ID: newID(), Prompt: prompt, Secret: isSecret(prompt)}, ch: make(chan authAnswer, 1)}
+	req := &authReq{p: AuthPrompt{ID: newID(), Prompt: prompt, Secret: isSecret(prompt)}, ch: make(chan authAnswer, 1), shown: make(chan struct{})}
 	a.authMu.Lock()
 	if a.authClosed {
 		a.authMu.Unlock()
@@ -48,20 +57,32 @@ func (a *App) askHandler(ctx context.Context, prompt string) (string, bool) {
 	}
 	a.authQueue = append(a.authQueue, req)
 	if len(a.authQueue) == 1 {
-		a.emit(EventAuthPrompt, req.p)
+		a.showLocked(req)
 	}
 	a.authMu.Unlock()
 
-	timer := time.NewTimer(authTimeout)
-	defer timer.Stop()
+	var timeout <-chan time.Time // nil until the prompt is shown
+	shown := req.shown
 	var ans authAnswer
 	answered := false
-	select {
-	case ans = <-req.ch:
-		answered = true
-	case <-ctx.Done():
-	case <-timer.C:
-	case <-a.done:
+wait:
+	for {
+		select {
+		case ans = <-req.ch:
+			answered = true
+			break wait
+		case <-ctx.Done():
+			break wait
+		case <-shown:
+			shown = nil
+			timer := time.NewTimer(a.authTimeoutFor())
+			defer timer.Stop()
+			timeout = timer.C
+		case <-timeout:
+			break wait
+		case <-a.done:
+			break wait
+		}
 	}
 
 	a.authMu.Lock()
@@ -83,7 +104,7 @@ func (a *App) askHandler(ctx context.Context, prompt string) (string, bool) {
 			a.emit(EventAuthCancel, AuthCancel{ID: req.p.ID})
 		}
 		if len(a.authQueue) > 0 && !a.authClosed {
-			a.emit(EventAuthPrompt, a.authQueue[0].p)
+			a.showLocked(a.authQueue[0])
 		}
 	}
 	if answered && ctx.Err() == nil {
@@ -111,4 +132,11 @@ func (a *App) closeAuth() {
 	a.authMu.Lock()
 	a.authClosed = true
 	a.authMu.Unlock()
+}
+
+func (a *App) authTimeoutFor() time.Duration {
+	if a.authTimeoutOverride > 0 {
+		return a.authTimeoutOverride
+	}
+	return authTimeout
 }

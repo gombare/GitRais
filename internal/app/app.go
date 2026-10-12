@@ -73,6 +73,11 @@ type App struct {
 	cloneMu     sync.Mutex
 	cloneCancel context.CancelFunc
 
+	// Test seams (nil/zero in production).
+	authTimeoutOverride time.Duration   // replaces authTimeout when > 0
+	beforeRestoreOpen   func(id string) // called before RestoreTabs opens a saved tab
+	beforeAskpassClose  func()          // called by shutdown right before the askpass server is closed
+
 	emitFn  func(string, any)
 	pickDir func(title string) (string, error)
 }
@@ -200,15 +205,34 @@ func (a *App) shutdown() {
 		a.cloneCancel()
 	}
 	a.cloneMu.Unlock()
+
+	// Order matters: the askpass server is closed only after every session is
+	// closed, so a git process blocked on a credential prompt is killed by its
+	// session instead of failing mid-way because its helper lost the server.
+	// Pending prompts were already released above (closeAuth, a.done). Both
+	// phases share the shutdownTimeout budget.
+	deadline := time.After(shutdownTimeout)
+	if !a.waitClosed(deadline) {
+		return // leave the server and log open: a late session may still use them
+	}
 	if a.ap != nil {
-		ap := a.ap
+		if a.beforeAskpassClose != nil {
+			a.beforeAskpassClose()
+		}
 		a.closeWG.Add(1)
 		go func() {
 			defer a.closeWG.Done()
-			ap.Close()
+			a.ap.Close()
 		}()
+		if !a.waitClosed(deadline) {
+			return
+		}
 	}
+	a.log.Close()
+}
 
+// waitClosed waits for the background closers or the deadline.
+func (a *App) waitClosed(deadline <-chan time.Time) bool {
 	finished := make(chan struct{})
 	go func() {
 		a.closeWG.Wait()
@@ -216,9 +240,9 @@ func (a *App) shutdown() {
 	}()
 	select {
 	case <-finished:
-		a.log.Close()
-	case <-time.After(shutdownTimeout):
-		// Leave the log open: a late session may still record a command.
+		return true
+	case <-deadline:
+		return false
 	}
 }
 
@@ -260,7 +284,21 @@ func (a *App) Version() string { return "0.1.0" }
 // The app keeps running: the frontend shows it as a banner.
 func (a *App) StartupError() string { return a.startupErr }
 
+// interrupted reports whether err (may be nil) or the app state means the
+// app is closing, as opposed to a repository that cannot be opened.
+func (a *App) interrupted(err error) bool {
+	if errors.Is(err, session.ErrClosed) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed
+}
+
 func (a *App) sess(tab string) (*session.Session, error) {
+	if err := a.ready(); err != nil {
+		return nil, err // after Shutdown: Cancelled rather than NoTab
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e, ok := a.sessions[tab]

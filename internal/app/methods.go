@@ -97,7 +97,15 @@ func (a *App) RestoreTabs() ([]TabInfo, error) {
 			tabs = append(tabs, tabInfo(t.ID, e.s))
 			continue
 		}
+		if a.beforeRestoreOpen != nil {
+			a.beforeRestoreOpen(t.ID)
+		}
 		ti, err := a.openSession(t.ID, t.Path)
+		if a.interrupted(err) {
+			// The app is shutting down: the saved tabs are still valid, so
+			// leave the store untouched.
+			return tabs, uiErr(session.ErrClosed)
+		}
 		if err != nil || ti.ID != t.ID {
 			drop[t.ID] = true
 			continue
@@ -105,6 +113,9 @@ func (a *App) RestoreTabs() ([]TabInfo, error) {
 		tabs = append(tabs, ti)
 	}
 	if len(drop) > 0 {
+		if a.interrupted(nil) {
+			return tabs, uiErr(session.ErrClosed)
+		}
 		_, err = a.store.Update(func(s *store.State) {
 			s.Tabs = slices.DeleteFunc(s.Tabs, func(t store.Tab) bool { return drop[t.ID] })
 			if drop[s.ActiveTab] {
@@ -118,11 +129,15 @@ func (a *App) RestoreTabs() ([]TabInfo, error) {
 	return tabs, uiErr(err)
 }
 
-// OpenRepo opens the repository containing path in a new tab (or returns the
-// tab already showing it), makes it active and adds it to the recents.
+// OpenRepo opens the repository containing path (absolute, InvalidPath
+// otherwise) in a new tab (or returns the tab already showing it), makes it
+// active and adds it to the recents.
 func (a *App) OpenRepo(path string) (TabInfo, error) {
 	if err := a.ready(); err != nil {
 		return TabInfo{}, uiErr(err)
+	}
+	if path == "" || !filepath.IsAbs(path) {
+		return TabInfo{}, uiErr(errInvalidPath)
 	}
 	if ti, ok := a.findTab(path); ok {
 		return ti, nil
@@ -232,7 +247,13 @@ func (a *App) GraphInfo(tab string) (GraphInfo, error) {
 	})
 }
 
+// maxRowsPerCall bounds one Rows call (the frontend asks for a viewport).
+const maxRowsPerCall = 10000
+
 func (a *App) Rows(tab string, start, count int) ([]RowDTO, error) {
+	// Clamp here so start+count can never overflow inside graph.Index.Rows.
+	start = max(start, 0)
+	count = min(max(count, 0), maxRowsPerCall)
 	return with(a, tab, func(s *session.Session) ([]RowDTO, error) {
 		rows := s.Rows(start, count)
 		out := make([]RowDTO, len(rows))
