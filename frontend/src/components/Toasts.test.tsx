@@ -59,4 +59,16 @@ describe('Toasts removeLock', () => {
     await waitFor(() => expect(api.Pull).toHaveBeenCalled());
     expect(api.Pull).toHaveBeenCalledTimes(1);
   });
+  it('the Pull action uses the toolbar flow: PullStrategyRequired asks for a strategy', async () => {
+    useApp.setState({ toasts: [] });
+    act(() => useApp.getState().toast(JSON.stringify({ kind: 'NonFastForward', message: 'm', stderr: '' }), 't'));
+    api.Pull.mockRejectedValueOnce(new Error(JSON.stringify({ kind: 'PullStrategyRequired', message: 'x', stderr: '' })));
+    render(<><Toasts /><DialogHost /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'Pull' }));
+    await screen.findByRole('dialog');
+    expect(useApp.getState().toasts).toHaveLength(0);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Merge' })); });
+    await waitFor(() => expect(api.Pull).toHaveBeenLastCalledWith('t', 'merge'));
+    expect(useApp.getState().toasts).toHaveLength(0);
+  });
 });

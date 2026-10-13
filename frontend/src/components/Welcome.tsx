@@ -78,7 +78,7 @@ export function Welcome() {
         <button onClick={init}>Nuovo repository…</button>
       </div>
       <div className="welcome-clone">
-        <input placeholder="URL da clonare" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <input placeholder="URL da clonare" aria-label="URL da clonare" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button disabled={!url.trim() || busy} onClick={clone}>{busy ? 'Clonazione…' : 'Clona…'}</button>
         {busy && <button onClick={() => api.CancelClone().catch((e) => toast(e))}>Annulla</button>}
       </div>

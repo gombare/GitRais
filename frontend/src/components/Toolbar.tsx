@@ -1,14 +1,9 @@
-import { api, parseError } from '../api/client';
+import { api } from '../api/client';
 import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
-import { askText, chooseOption, confirmAction } from './Dialogs';
+import { askTextCheck, confirmAction } from './Dialogs';
 import { openMenu } from './ContextMenu';
-
-const PULL_MODES = [
-  { value: 'merge', label: 'Merge' },
-  { value: 'rebase', label: 'Rebase' },
-  { value: 'ff-only', label: 'Solo fast-forward' },
-];
+import { createBranchAt, localWrite, pull, PULL_MODES } from '../actions/repoActions';
 
 // Actions that are currently running, keyed by tab and name: a double click
 // must not start them twice. Module-level because the toolbar and the
@@ -37,26 +32,9 @@ export function useRepoActions(tab: string) {
       inFlight.delete(key);
     }
   };
-  const pull = async (mode = ''): Promise<void> => {
-    if (busy()) return;
-    try {
-      await useApp.getState().runOp(tab, 'pull', () => api.Pull(tab, mode as never));
-    } catch (e) {
-      if (mode === '' && parseError(e).kind === 'PullStrategyRequired') {
-        const m = await chooseOption({
-          title: 'Come integrare le modifiche?',
-          message: 'Le branch locale e remota sono divergenti: scegli la strategia di pull.',
-          options: PULL_MODES,
-        });
-        if (m) await pull(m);
-        return;
-      }
-      toast(e, tab);
-    }
-  };
   return {
     fetch: () => { if (!busy()) return remote('fetch', () => api.Fetch(tab)); },
-    pull,
+    pull: (mode = '') => pull(tab, mode),
     push: (force = false) => { if (!busy()) return remote('push', () => api.Push(tab, force)); },
     forcePush: async () => {
       const ok = await confirmAction({
@@ -66,22 +44,27 @@ export function useRepoActions(tab: string) {
       });
       if (ok && !busy()) await remote('push', () => api.Push(tab, true));
     },
-    branch: () => once('branch', async () => {
-      const n = await askText({ title: 'Nuovo branch da HEAD', label: 'Nome' });
-      if (n) await api.CreateBranch(tab, n, 'HEAD', true).catch((e) => toast(e, tab));
+    branch: () => once('branch', () => createBranchAt(tab, 'HEAD', 'Nuovo branch da HEAD')),
+    // Optional message; untracked files are included unless the user unticks the box.
+    stash: () => once('stash', async () => {
+      const r = await askTextCheck({
+        title: 'Stash delle modifiche', label: 'Messaggio (facoltativo)', allowEmpty: true,
+        check: { label: 'Includi i file non tracciati', initial: true },
+      });
+      if (r) await localWrite(tab, api.StashPush(tab, r.text, r.checked));
     }),
-    stash: () => once('stash', () => api.StashPush(tab, '', true).catch((e) => toast(e, tab))),
     pop: () => {
       // The newest stash comes first; the backend identifies stashes by commit hash.
       const top = useRepo.getState().repos[tab]?.stashes[0];
       if (!top) return;
-      return api.StashPop(tab, top.Hash).catch((e) => toast(e, tab));
+      return localWrite(tab, api.StashPop(tab, top.Hash));
     },
   };
 }
 
 export function Toolbar({ tab }: { tab: string }) {
   const op = useApp((s) => s.ops[tab]);
+  const writing = useApp((s) => (s.writes[tab] ?? 0) > 0);
   const toast = useApp((s) => s.toast);
   const stashes = useRepo((s) => s.repos[tab]?.stashes.length ?? 0);
   const head = useRepo((s) => s.repos[tab]?.refs?.head);
@@ -111,6 +94,8 @@ export function Toolbar({ tab }: { tab: string }) {
       <button disabled={stashes === 0} aria-label="Pop stash" onClick={a.pop}>Pop</button>
       <span className="tb-flex" />
       <span className="muted">{head ? (head.detached ? `HEAD staccata ${head.hash.slice(0, 7)}` : head.branch) : ''}</span>
+      {/* Always mounted so screen readers announce changes; a remote op shows its own progress instead. */}
+      <span className="tb-busy" aria-live="polite">{writing && !op ? 'Operazione in corso…' : ''}</span>
       {op && (
         <span className="tb-op" role="status">
           {op.op}… {op.phase} {op.percent > 0 && `${op.percent}%`}

@@ -5,6 +5,8 @@ import { useRepo } from '../store/repo';
 import { RowCache } from '../graph/rowCache';
 import { useDevicePixelRatio } from '../hooks/useDevicePixelRatio';
 import { drawGraph } from '../graph/draw';
+import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
+import { commitMenu, stashMenu } from '../actions/repoActions';
 import { graphWidth, GRAPH_PAD, LANE_W, ROW_H, visibleRange } from '../graph/geometry';
 import type { app, gitread } from '../../wailsjs/go/models';
 
@@ -22,6 +24,11 @@ function refsByHash(refs?: gitread.Refs): Map<string, gitread.Ref[]> {
 }
 
 const fmtDate = (t: number) => new Date(t * 1000).toLocaleString();
+
+// Stash rows get the same actions as the left panel's stash list; commits get checkout/branch/tag/copy.
+const rowMenu = (tab: string, r: app.RowDTO): MenuItem[] => r.kind === 'stash'
+  ? stashMenu(tab, { Hash: r.hash, Ref: r.stashRef, Subject: r.subject })
+  : commitMenu(tab, r.hash);
 
 export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<GraphHandle> }) {
   const total = useRepo((s) => s.repos[tab]?.graphRows ?? 0);
@@ -168,6 +175,17 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
   }, [select, tab]);
 
   const onKey = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      if (!selected) return;
+      const k = rows.findIndex((r) => r?.hash === selected);
+      const r = k >= 0 ? rows[k] : cache.get(selIndex.current)?.hash === selected ? cache.get(selIndex.current) : undefined;
+      if (!r) return;
+      // Anchor to the selected row when it is rendered, otherwise to the list itself.
+      const el = k >= 0 ? document.getElementById(`${listId}-opt-${start + k}`) : null;
+      openMenuAt(el ?? e.currentTarget as HTMLElement, rowMenu(tab, r));
+      return;
+    }
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
     let cur = -1;
@@ -187,7 +205,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
       const loaded = cache.get(next);
       if (loaded) selectRow(next, loaded);
     }, () => undefined);
-  }, [selected, rows, start, total, cache, selectRow, ensureVisible]);
+  }, [selected, rows, start, total, cache, selectRow, ensureVisible, listId, tab]);
 
   return (
     <div className="graph">
@@ -198,7 +216,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
         </div>
       )}
       <div className="graph-scroll" ref={scroller} tabIndex={0} onKeyDown={onKey}
-        role="listbox" aria-label="Storia dei commit"
+        role="listbox" aria-label="Storia dei commit" aria-keyshortcuts="Shift+F10 ContextMenu"
         aria-activedescendant={activeIdx >= 0 ? `${listId}-opt-${activeIdx}` : undefined}
         onScroll={(e) => {
           scrollTopRef.current = e.currentTarget.scrollTop;
@@ -215,7 +233,14 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
                 aria-posinset={i + 1} aria-setsize={total}
                 className={`graph-row ${r && r.hash === selected ? 'selected' : ''}`}
                 style={{ top: i * ROW_H, height: ROW_H, paddingLeft: width }}
-                onClick={() => r && selectRow(i, r)}>
+                onClick={() => r && selectRow(i, r)}
+                onContextMenu={(e) => {
+                  if (!r) return;
+                  selectRow(i, r);
+                  // Keep keyboard focus on the list so Escape returns there.
+                  scroller.current?.focus();
+                  openMenu(e, rowMenu(tab, r));
+                }}>
                 {r ? (
                   <>
                     <span className="graph-refs">

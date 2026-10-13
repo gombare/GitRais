@@ -21,7 +21,7 @@ const uiErr = (kind: string) => new Error(JSON.stringify({ kind, message: kind, 
 
 beforeEach(() => {
   Object.values(api).forEach((m) => m.mockReset().mockResolvedValue(undefined));
-  useApp.setState({ tabs: [{ id: 't', path: '/r', name: 'r' }], active: 't', toasts: [], ops: {} });
+  useApp.setState({ tabs: [{ id: 't', path: '/r', name: 'r' }], active: 't', toasts: [], ops: {}, writes: {} });
   useRepo.setState({ repos: { t: { stashes: [{ Hash: 'h1' } as any], graphRows: 0, graphDone: true, graphVersion: 0,
     selection: { kind: 'wip' }, diff: null, refs: { head: { branch: 'main', detached: false, unborn: false, hash: 'abc1234' }, refs: [] } as any } } });
 });
@@ -103,25 +103,70 @@ describe('Toolbar', () => {
     await waitFor(() => expect((screen.getByRole('button', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(true));
     await act(async () => { done(); });
   });
-  it('stash pops the newest stash by hash', async () => {
+  it('pop pops the newest stash by hash', async () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Pop stash' }));
     await waitFor(() => expect(api.StashPop).toHaveBeenCalledWith('t', 'h1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
-    await waitFor(() => expect(api.StashPush).toHaveBeenCalledWith('t', '', true));
   });
-  it('Stash and Branch ignore a second activation while one is running', async () => {
+  it('stash asks for an optional message and whether to include untracked files (default: include)', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
+    await screen.findByRole('dialog');
+    expect(api.StashPush).not.toHaveBeenCalled();
+    const box = screen.getByRole('checkbox', { name: /non tracciati/ }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await waitFor(() => expect(api.StashPush).toHaveBeenCalledWith('t', '', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
+    await screen.findByRole('dialog');
+    fireEvent.change(screen.getByLabelText(/Messaggio/), { target: { value: ' wip login ' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /non tracciati/ }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await waitFor(() => expect(api.StashPush).toHaveBeenLastCalledWith('t', 'wip login', false));
+  });
+  it('stash: cancel does not stash', async () => {
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
+    await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Annulla' })); });
+    expect(api.StashPush).not.toHaveBeenCalled();
+  });
+  it('Stash ignores a second activation while one is running', async () => {
     let done!: () => void;
     api.StashPush.mockImplementation(() => new Promise<undefined>((r) => { done = () => r(undefined); }));
     mount();
     const b = screen.getByRole('button', { name: 'Stash' });
     fireEvent.click(b);
     fireEvent.click(b);
+    expect(await screen.findAllByRole('dialog')).toHaveLength(1);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    fireEvent.click(b);
+    expect(screen.queryByRole('dialog')).toBeNull(); // still running
     expect(api.StashPush).toHaveBeenCalledTimes(1);
     await act(async () => { done(); });
-    fireEvent.click(b);
-    expect(api.StashPush).toHaveBeenCalledTimes(2);
+  });
+  it('local writes show a non-blocking busy indicator; remote ops show only their progress', async () => {
+    mount();
+    expect(screen.queryByText('Operazione in corso…')).toBeNull();
+    act(() => useApp.setState({ writes: { t: 1 } }));
+    const ind = screen.getByText('Operazione in corso…');
+    expect(ind.closest('[aria-live="polite"]')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Fetch' }) as HTMLButtonElement).disabled).toBe(false);
+    act(() => useApp.setState({ ops: { t: { op: 'fetch', phase: '', percent: 0 } } }));
+    expect(screen.queryByText('Operazione in corso…')).toBeNull();
+    act(() => useApp.setState({ ops: {}, writes: {} }));
+    expect(screen.queryByText('Operazione in corso…')).toBeNull();
+  });
+  it('a stash in flight marks the tab busy', async () => {
+    let done!: () => void;
+    api.StashPush.mockImplementation(() => new Promise<undefined>((r) => { done = () => r(undefined); }));
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
+    await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await screen.findByText('Operazione in corso…');
     await act(async () => { done(); });
+    expect(screen.queryByText('Operazione in corso…')).toBeNull();
   });
   it('Branch dialog cannot be opened twice', async () => {
     mount();

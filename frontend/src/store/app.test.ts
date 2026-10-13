@@ -158,3 +158,29 @@ describe('helpers', () => {
     expect(displayName('/')).toBe('/');
   });
 });
+
+describe('trackWrite (local write busy counter)', () => {
+  it('counts overlapping writes per tab and clears on settle, success or error', async () => {
+    useApp.setState({ tabs: [tab('a')], writes: {} });
+    let release!: () => void;
+    const slow = useApp.getState().trackWrite('a', new Promise<void>((r) => { release = r; }));
+    expect(useApp.getState().writes.a).toBe(1);
+    const failing = useApp.getState().trackWrite('a', Promise.reject(new Error('x')));
+    expect(useApp.getState().writes.a).toBe(2);
+    await expect(failing).rejects.toThrow('x');
+    expect(useApp.getState().writes.a).toBe(1);
+    release();
+    await slow;
+    expect(useApp.getState().writes.a).toBeUndefined();
+  });
+  it('returns the result of the write', async () => {
+    useApp.setState({ tabs: [tab('a')], writes: {} });
+    await expect(useApp.getState().trackWrite('a', Promise.resolve(42))).resolves.toBe(42);
+  });
+  it('close drops the counter of the tab', async () => {
+    useApp.setState({ tabs: [tab('a')], writes: {} });
+    void useApp.getState().trackWrite('a', new Promise(() => {}));
+    await useApp.getState().close('a');
+    expect(useApp.getState().writes.a).toBeUndefined();
+  });
+});

@@ -50,7 +50,7 @@ export function RepoView({ tab }: { tab: string }) {
     if (scrollRequest) graph.current?.scrollToRow(scrollRequest.row);
   }, [scrollRequest]);
 
-  const run = (p: Promise<unknown>) => p.catch((e) => toast(e, tab));
+  const run = (p: Promise<unknown>) => useApp.getState().trackWrite(tab, p).catch((e) => toast(e, tab));
   const clickCommit = () => root.current?.querySelector<HTMLButtonElement>('[data-command="commit:commit"]')?.click();
 
   // The same handlers back the toolbar buttons; only the active tab listens.
@@ -64,7 +64,7 @@ export function RepoView({ tab }: { tab: string }) {
       useRepo.getState().select(tab, { kind: 'wip' });
       // Never commit on top of a failed stage: abort and let the toast explain.
       try {
-        await api.StageAll(tab);
+        await useApp.getState().trackWrite(tab, api.StageAll(tab));
       } catch (e) {
         toast(e, tab);
         return;

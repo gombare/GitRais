@@ -4,6 +4,7 @@ import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
 import { groupRefs, remoteBranchName } from '../leftpanel/groupRefs';
 import { askText, confirmAction } from './Dialogs';
+import { createBranchAt, createTagAt, localWrite, stashMenu } from '../actions/repoActions';
 import { openMenu, type MenuItem } from './ContextMenu';
 import type { gitread, graph } from '../../wailsjs/go/models';
 
@@ -22,7 +23,7 @@ export function LeftPanel({ tab }: { tab: string }) {
   const g = groupRefs(refs, filter);
 
   // Local (non-progress) ops: failures become toasts; Cancelled stays silent.
-  const run = (p: Promise<unknown>) => p.catch((e) => toast(e, tab));
+  const run = (p: Promise<unknown>) => localWrite(tab, p);
   // Ops that can emit op:progress must go through runOp.
   const runRemote = (op: string, fn: () => Promise<unknown>) => runOp(tab, op, fn).catch((e) => toast(e, tab));
   const checkout = (kind: 'local' | 'remote', name: string) => run(api.Checkout(tab, { kind, name }));
@@ -30,7 +31,7 @@ export function LeftPanel({ tab }: { tab: string }) {
   const deleteBranch = async (r: gitread.Ref) => {
     if (!(await confirmAction({ title: 'Elimina branch', message: `Eliminare il branch ${r.short}?`, danger: true }))) return;
     try {
-      await api.DeleteBranch(tab, r.short, false);
+      await useApp.getState().trackWrite(tab, api.DeleteBranch(tab, r.short, false));
     } catch (e) {
       const err = parseError(e);
       // Force only when git refused because the branch is not fully merged, and only after asking again.
@@ -44,10 +45,7 @@ export function LeftPanel({ tab }: { tab: string }) {
 
   const localMenu = (r: gitread.Ref): MenuItem[] => [
     { label: `Checkout ${r.short}`, disabled: r.isHead, onClick: () => checkout('local', r.short) },
-    { label: 'Crea branch da qui…', onClick: async () => {
-      const n = await askText({ title: 'Nuovo branch', label: 'Nome' });
-      if (n) run(api.CreateBranch(tab, n, r.name, true));
-    } },
+    { label: 'Crea branch da qui…', onClick: () => createBranchAt(tab, r.name) },
     { label: 'Rinomina…', onClick: async () => {
       const n = await askText({ title: `Rinomina ${r.short}`, label: 'Nuovo nome', initial: r.short });
       if (n && n !== r.short) run(api.RenameBranch(tab, r.short, n));
@@ -56,10 +54,7 @@ export function LeftPanel({ tab }: { tab: string }) {
       const u = await askText({ title: `Upstream di ${r.short}`, label: 'remote/branch', initial: r.upstream || `origin/${r.short}` });
       if (u) run(api.SetUpstream(tab, r.short, u));
     } },
-    { label: 'Crea tag qui…', onClick: async () => {
-      const n = await askText({ title: 'Nuovo tag', label: 'Nome' });
-      if (n) run(api.CreateTag(tab, n, r.name, ''));
-    } },
+    { label: 'Crea tag qui…', onClick: () => createTagAt(tab, r.name) },
     'separator',
     { label: `Elimina ${r.short}`, danger: true, disabled: r.isHead, onClick: () => deleteBranch(r) },
   ];
@@ -83,16 +78,6 @@ export function LeftPanel({ tab }: { tab: string }) {
     'separator',
     { label: `Elimina ${r.short}`, danger: true, onClick: async () => {
       if (await confirmAction({ title: 'Elimina tag', message: `Eliminare il tag ${r.short}?`, danger: true })) run(api.DeleteTag(tab, r.short));
-    } },
-  ];
-
-  // Stash operations take the stash commit HASH, never stash@{N} (indexes shift as stashes change).
-  const stashMenu = (s: graph.Stash): MenuItem[] => [
-    { label: 'Applica', onClick: () => run(api.StashApply(tab, s.Hash)) },
-    { label: 'Pop', onClick: () => run(api.StashPop(tab, s.Hash)) },
-    'separator',
-    { label: 'Elimina', danger: true, onClick: async () => {
-      if (await confirmAction({ title: 'Elimina stash', message: `Eliminare ${s.Ref} (${s.Subject})?`, danger: true })) run(api.StashDrop(tab, s.Hash));
     } },
   ];
 
@@ -143,7 +128,7 @@ export function LeftPanel({ tab }: { tab: string }) {
         )))}
       {section('tags', 'Tag', g.tags.length, <ul>{g.tags.map((r) => refRow(r, tagMenu(r), () => jump(tab, r.hash)))}</ul>)}
       {section('stash', 'Stash', stashes.length, <ul>{stashes.map((s) =>
-        row(s.Hash, s.Subject, s.Hash, () => jump(tab, s.Hash), stashMenu(s), <span className="muted">{s.Ref}</span>))}</ul>)}
+        row(s.Hash, s.Subject, s.Hash, () => jump(tab, s.Hash), stashMenu(tab, s), <span className="muted">{s.Ref}</span>))}</ul>)}
     </div>
   );
 }

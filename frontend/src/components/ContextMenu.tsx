@@ -20,6 +20,13 @@ export function openMenu(e: React.MouseEvent, items: MenuItem[]) {
   useMenu.setState({ x, y, items, opener });
 }
 
+// Keyboard entry point (ContextMenu key, Shift+F10): the menu is anchored below `anchor`.
+export function openMenuAt(anchor: HTMLElement, items: MenuItem[]) {
+  const r = anchor.getBoundingClientRect();
+  const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  useMenu.setState({ x: r.left + 8, y: r.bottom, items, opener });
+}
+
 function closeMenu(restoreFocus: boolean) {
   const { opener } = useMenu.getState();
   useMenu.setState({ items: null, opener: null });

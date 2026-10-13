@@ -3,12 +3,12 @@ import { api } from '../api/client';
 import { describeError } from '../api/errors';
 import { useApp } from '../store/app';
 import { confirmAction } from './Dialogs';
+import { pull } from '../actions/repoActions';
 
 export function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismiss = useApp((s) => s.dismiss);
   const toast = useApp((s) => s.toast);
-  const runOp = useApp((s) => s.runOp);
   // Actions already running, so a double click cannot start them twice.
   const running = useRef(new Set<string>());
   const act = async (id: number, action: string, tab?: string) => {
@@ -21,7 +21,8 @@ export function Toasts() {
       return;
     }
     try {
-      if (action === 'pull') await runOp(tab, 'pull', () => api.Pull(tab, ''));
+      // Same flow as the toolbar button, including the merge/rebase/ff-only choice.
+      if (action === 'pull') await pull(tab);
       if (action === 'removeLock') {
         // The backend only removes <gitdir>/index.lock, and only if no process holds it.
         const ok = await confirmAction({
@@ -30,7 +31,7 @@ export function Toasts() {
           danger: true,
         });
         if (ok) {
-          await api.RemoveIndexLock(tab);
+          await useApp.getState().trackWrite(tab, api.RemoveIndexLock(tab));
           toast(JSON.stringify({ kind: 'LockRemoved', message: 'Lock rimosso', stderr: '' }), tab);
         }
       }

@@ -75,7 +75,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
   };
   // Runs a mutation, then refreshes the status explicitly (watcher events may lag or be missed).
   const run = (p: Promise<unknown>) =>
-    p.then(() => useRepo.getState().refreshStatus(tab)).catch((e) => toast(e, tab));
+    useApp.getState().trackWrite(tab, p).then(() => useRepo.getState().refreshStatus(tab)).catch((e) => toast(e, tab));
   const currentGroups = () => groupFiles(useRepo.getState().repos[tab]?.status?.files ?? []);
 
   const files = st?.files ?? [];
@@ -120,7 +120,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
     setHookErr('');
     const sent = { ...latest.current };
     try {
-      await api.Commit(tab, { message: buildMessage(sent.summary, sent.body), amend } as any);
+      await useApp.getState().trackWrite(tab, api.Commit(tab, { message: buildMessage(sent.summary, sent.body), amend } as any));
       setAmend(false);
       prefill.current = null;
       void useRepo.getState().refreshStatus(tab);

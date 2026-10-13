@@ -76,6 +76,8 @@ input, textarea { background: var(--bg-2); color: var(--fg); border: 1px solid v
 .modal h3 { margin: 0; }
 .modal p { margin: 0; overflow-wrap: anywhere; }
 .modal label { display: flex; flex-direction: column; gap: 4px; }
+.modal label.modal-check { flex-direction: row; align-items: center; gap: 6px; }
+.tb-busy { color: var(--fg-muted); font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 button.primary { background: var(--accent); color: #000; border-color: var(--accent); }
 button.danger { background: var(--danger); color: #000; border-color: var(--danger); }

@@ -2,8 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 
 type Base = { opener: HTMLElement | null };
+type TextOptions = {
+  title: string;
+  label?: string;
+  initial?: string;
+  // OK is enabled with an empty value too (it resolves ''); Cancel still resolves null.
+  allowEmpty?: boolean;
+};
+type Check = { label: string; initial: boolean };
+export type TextCheck = { text: string; checked: boolean };
 type Dialog =
-  | (Base & { kind: 'text'; title: string; label?: string; initial?: string; resolve: (v: string | null) => void })
+  | (Base & TextOptions & { kind: 'text'; check?: Check; resolve: (v: TextCheck | null) => void })
   | (Base & { kind: 'choice'; title: string; message: string; options: { value: string; label: string }[]; resolve: (v: string | null) => void })
   | (Base & { kind: 'confirm'; title: string; message: string; danger?: boolean; resolve: (v: boolean) => void });
 
@@ -18,7 +27,12 @@ function show(d: Dialog) {
 
 const opener = () => (document.activeElement instanceof HTMLElement ? document.activeElement : null);
 
-export function askText(o: { title: string; label?: string; initial?: string }): Promise<string | null> {
+export function askText(o: TextOptions): Promise<string | null> {
+  return new Promise((resolve) => show({ kind: 'text', ...o, resolve: (v) => resolve(v ? v.text : null), opener: opener() }));
+}
+
+// Text field plus one checkbox (e.g. "checkout the new branch"); resolves both, or null if cancelled.
+export function askTextCheck(o: TextOptions & { check: Check }): Promise<TextCheck | null> {
   return new Promise((resolve) => show({ kind: 'text', ...o, resolve, opener: opener() }));
 }
 
@@ -36,11 +50,13 @@ const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), [tabindex]:not
 export function DialogHost() {
   const d = useDialog((s) => s.d);
   const [value, setValue] = useState('');
+  const [checked, setChecked] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const root = useRef<HTMLFormElement>(null);
   useEffect(() => {
     if (d?.kind === 'text') {
       setValue(d.initial ?? '');
+      setChecked(d.check?.initial ?? false);
       const t = setTimeout(() => input.current?.select(), 0);
       return () => clearTimeout(t);
     }
@@ -48,7 +64,7 @@ export function DialogHost() {
   if (!d) return null;
   const close = (ok: boolean) => {
     useDialog.setState({ d: null });
-    if (d.kind === 'text') d.resolve(ok && value.trim() ? value.trim() : null);
+    if (d.kind === 'text') d.resolve(ok && (value.trim() || d.allowEmpty) ? { text: value.trim(), checked } : null);
     else if (d.kind === 'choice') d.resolve(null);
     else d.resolve(ok);
     d.opener?.focus(); // return focus to whatever opened the dialog
@@ -78,7 +94,7 @@ export function DialogHost() {
     d.opener?.focus();
   };
   const dangerConfirm = d.kind === 'confirm' && !!d.danger;
-  const empty = d.kind === 'text' && !value.trim();
+  const empty = d.kind === 'text' && !d.allowEmpty && !value.trim();
   return (
     <div className="modal-backdrop" onMouseDown={() => close(false)}>
       <form ref={root} className="modal" role="dialog" aria-modal="true" aria-label={d.title}
@@ -89,6 +105,12 @@ export function DialogHost() {
         {d.kind === 'text'
           ? <label>{d.label}<input ref={input} autoFocus value={value} onChange={(e) => setValue(e.target.value)} /></label>
           : <p>{d.message}</p>}
+        {d.kind === 'text' && d.check && (
+          <label className="modal-check">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+            {d.check.label}
+          </label>
+        )}
         {d.kind === 'choice' && (
           <div className="modal-choices">
             {d.options.map((o, i) => <button key={o.value} type="button" autoFocus={i === 0} onClick={() => pick(o.value)}>{o.label}</button>)}

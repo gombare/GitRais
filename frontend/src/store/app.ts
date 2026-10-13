@@ -16,6 +16,9 @@ type AppStore = {
   toasts: Toast[];
   authQueue: AuthPrompt[];
   ops: Record<string, OpState>;
+  // Local write bindings in flight per tab (stage, commit, checkout...): drives the toolbar's
+  // "operation running" indicator. Separate from ops, which only tracks progress-emitting ops.
+  writes: Record<string, number>;
   init(): Promise<void>;
   open(path: string): Promise<void>;
   close(id: string): Promise<void>;
@@ -30,6 +33,8 @@ type AppStore = {
   // Marks `op` as running on `tab` (use '' for tab-less ops such as clone) for the duration of fn.
   // ops[tab] is cleared when fn settles, on success or error; the error is rethrown.
   runOp<T>(tab: string, op: string, fn: () => Promise<T>): Promise<T>;
+  // Counts `p` as a local write on `tab` until it settles; returns (or rethrows) its outcome.
+  trackWrite<T>(tab: string, p: Promise<T>): Promise<T>;
   pushAuth(p: AuthPrompt): void;
   shiftAuth(): void;
   cancelAuth(id: string): void;
@@ -47,6 +52,7 @@ export const useApp = create<AppStore>((set, get) => ({
   toasts: [],
   authQueue: [],
   ops: {},
+  writes: {},
   async init() {
     // The app can run with startup problems (e.g. git missing): show them but keep going.
     try {
@@ -92,9 +98,11 @@ export const useApp = create<AppStore>((set, get) => ({
     set((s) => {
       const tabs = s.tabs.filter((t) => t.id !== id);
       const { [id]: _op, ...ops } = s.ops;
+      const { [id]: _writes, ...writes } = s.writes;
       return {
         tabs,
         ops,
+        writes,
         toasts: s.toasts.filter((t) => t.tab !== id),
         active: s.active === id ? (tabs.at(-1)?.id ?? null) : s.active,
       };
@@ -152,6 +160,21 @@ export const useApp = create<AppStore>((set, get) => ({
           return { ops };
         });
       }
+    }
+  },
+  async trackWrite(tab, p) {
+    set((s) => ({ writes: { ...s.writes, [tab]: (s.writes[tab] ?? 0) + 1 } }));
+    try {
+      return await p;
+    } finally {
+      set((s) => {
+        // The tab may have been closed meanwhile: never resurrect its entry.
+        if (!(tab in s.writes)) return s;
+        const left = s.writes[tab] - 1;
+        if (left > 0) return { writes: { ...s.writes, [tab]: left } };
+        const { [tab]: _done, ...writes } = s.writes;
+        return { writes };
+      });
     }
   },
   pushAuth(p) {

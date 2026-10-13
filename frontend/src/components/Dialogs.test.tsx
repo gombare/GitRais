@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { askText, confirmAction, DialogHost } from './Dialogs';
+import { askText, askTextCheck, confirmAction, DialogHost } from './Dialogs';
 
 afterEach(cleanup);
 
@@ -77,5 +77,31 @@ describe('Dialogs', () => {
     act(() => { a = confirmAction({ title: '1', message: 'm' }); });
     act(() => { void confirmAction({ title: '2', message: 'm' }); });
     await expect(a).resolves.toBe(false);
+  });
+});
+
+describe('Dialogs: optional text and checkbox', () => {
+  it('allowEmpty: OK with an empty value resolves "", Cancel resolves null', async () => {
+    render(<DialogHost />);
+    let p!: Promise<string | null>;
+    act(() => { p = askText({ title: 'T', label: 'Messaggio', allowEmpty: true }); });
+    expect((screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled).toBe(false);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await expect(p).resolves.toBe('');
+    act(() => { p = askText({ title: 'T', label: 'Messaggio', allowEmpty: true }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Annulla' })); });
+    await expect(p).resolves.toBeNull();
+  });
+  it('askTextCheck returns the text and a labelled, keyboard-reachable checkbox state', async () => {
+    render(<DialogHost />);
+    let p!: Promise<{ text: string; checked: boolean } | null>;
+    act(() => { p = askTextCheck({ title: 'T', label: 'Nome', check: { label: 'Checkout', initial: true } }); });
+    const box = screen.getByRole('checkbox', { name: 'Checkout' }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.tabIndex).not.toBe(-1);
+    fireEvent.click(box);
+    fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'feat' } });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await expect(p).resolves.toEqual({ text: 'feat', checked: false });
   });
 });

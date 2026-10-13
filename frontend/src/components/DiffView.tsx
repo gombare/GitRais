@@ -127,7 +127,7 @@ export function DiffView({ tab }: { tab: string }) {
   const mutate = async (fn: () => Promise<unknown>, after?: () => void) => {
     setBusy(true);
     try {
-      await fn();
+      await useApp.getState().trackWrite(tab, fn());
       void useRepo.getState().refreshStatus(tab);
       // A new target reloads through the target effect.
       if (after) after();
