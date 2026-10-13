@@ -9,6 +9,7 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   DirtyWorktree: ['Modifiche locali', 'Le modifiche locali verrebbero sovrascritte: fai commit o stash.', null],
   Locked: ['Repository bloccato', 'Un altro processo git sta usando il repository (index.lock).', 'removeLock'],
   // Informational: shown after a successful lock removal.
+  ClipboardUnavailable: ['Appunti non disponibili', 'Impossibile copiare negli appunti.', null],
   LockRemoved: ['Lock rimosso: riprova l’operazione', 'index.lock è stato rimosso.', null],
   LockInUse: ['Lock in uso', 'Un processo sta ancora usando index.lock: attendi la fine dell’operazione.', null],
   LockTooRecent: ['Lock appena creato', 'index.lock è stato creato pochi secondi fa: un’operazione git potrebbe essere in corso. Riprova tra poco.', null],

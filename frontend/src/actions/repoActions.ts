@@ -25,7 +25,10 @@ export function localWrite(tab: string, p: Promise<unknown>): Promise<void> {
 // Ignored while another remote op runs on the tab.
 export async function pull(tab: string, mode = ''): Promise<void> {
   const app = useApp.getState();
-  if (app.ops[tab]) return;
+  if (app.ops[tab]) {
+    toast(JSON.stringify({ kind: 'OpInProgress', message: '', stderr: '' }), tab);
+    return;
+  }
   try {
     await app.runOp(tab, 'pull', () => api.Pull(tab, mode as never));
   } catch (e) {
@@ -71,7 +74,8 @@ export function commitMenu(tab: string, hash: string): MenuItem[] {
     { label: 'Crea tag qui…', onClick: () => createTagAt(tab, hash) },
     'separator',
     { label: 'Copia hash', onClick: () => {
-      navigator.clipboard?.writeText(hash).catch((e) => toast(e, tab));
+      if (!navigator.clipboard) toast(JSON.stringify({ kind: 'ClipboardUnavailable', message: '', stderr: '' }), tab);
+      else navigator.clipboard.writeText(hash).catch((e) => toast(e, tab));
     } },
   ];
 }

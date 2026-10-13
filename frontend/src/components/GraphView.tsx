@@ -235,6 +235,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
                 style={{ top: i * ROW_H, height: ROW_H, paddingLeft: width }}
                 onClick={() => r && selectRow(i, r)}
                 onContextMenu={(e) => {
+                  e.preventDefault(); // no native WebView menu, even on a row still loading
                   if (!r) return;
                   selectRow(i, r);
                   // Keep keyboard focus on the list so Escape returns there.
