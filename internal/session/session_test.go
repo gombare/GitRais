@@ -1010,3 +1010,28 @@ func TestCloseCancelsCommitGraphWrite(t *testing.T) {
 		t.Fatalf("reload after a cancelled commit-graph write: %d resets", n)
 	}
 }
+
+// Ref changes made by someone else while a working-tree-only write runs are
+// dropped by the suspended watcher; the session still reports them.
+func TestRefChangeDuringWipWriteNotLost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("fsevents")
+	}
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	s, rec := open(t, repo)
+	rec.waitFor(t, "graph:progress", graphDone(1))
+	time.Sleep(300 * time.Millisecond)
+	before := rec.count("refs:changed")
+	err := s.write(bg, false, func(context.Context) error {
+		repo.CommitAll("external commit") // e.g. a commit from a terminal
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := rec.count("refs:changed"); n <= before {
+		t.Fatalf("refs:changed not emitted after a wip-only write that saw a ref change: %v", rec.events)
+	}
+	rec.waitFor(t, "graph:progress", graphDone(2))
+}

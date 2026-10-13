@@ -197,16 +197,17 @@ func (w *Watcher) fire(gen int) {
 }
 
 // Suspend holds back notifications (typically while the app itself writes to the
-// repository). The returned resume must be called once; further calls are no-ops.
-// resume(true) delivers what was held, resume(false) drops the events observed
-// since this Suspend call.
+// repository). The returned resume must be called once; further calls are no-ops
+// and return 0. resume(true) delivers what was held, resume(false) drops the
+// events observed since this Suspend call and returns their kinds (0 for
+// resume(true)), so the caller can still act on changes it did not cause.
 //
 // resume(false) first flushes the source and waits until everything it held back
 // has been classified (the OS delivers file events with some latency), so the
 // app's own writes made while suspended are really discarded. It may therefore
 // block briefly; it may be called from any goroutine, including from emit, but
 // not from ignore.
-func (w *Watcher) Suspend() (resume func(flush bool)) {
+func (w *Watcher) Suspend() (resume func(flush bool) Kind) {
 	w.mu.Lock()
 	w.suspended++
 	w.epoch++
@@ -215,7 +216,7 @@ func (w *Watcher) Suspend() (resume func(flush bool)) {
 	w.mu.Unlock()
 
 	var once sync.Once
-	return func(flush bool) {
+	return func(flush bool) (dropped Kind) {
 		once.Do(func() {
 			if !flush && !w.closed.Load() {
 				w.barrier() // still suspended: late events land in held and are dropped below
@@ -229,6 +230,8 @@ func (w *Watcher) Suspend() (resume func(flush bool)) {
 				for _, h := range w.held {
 					if h.epoch < start {
 						kept = append(kept, h)
+					} else {
+						dropped |= h.kind
 					}
 				}
 				w.held = kept
@@ -244,6 +247,7 @@ func (w *Watcher) Suspend() (resume func(flush bool)) {
 				w.schedule()
 			}
 		})
+		return dropped
 	}
 }
 

@@ -486,7 +486,7 @@ func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context)
 	if s.ctx.Err() != nil { // the lock and Close raced: never start after Close
 		return ErrClosed
 	}
-	resumes := make([]func(bool), 0, len(s.watchers))
+	resumes := make([]func(bool) watch.Kind, 0, len(s.watchers))
 	for _, w := range s.watchers {
 		resumes = append(resumes, w.Suspend())
 	}
@@ -494,11 +494,14 @@ func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context)
 	// resume(false) waits briefly for FSEvents to deliver the write's own events
 	// so they are discarded. It must not run under a lock onFS needs: onFS takes
 	// none that is held here.
+	var dropped watch.Kind
 	for _, resume := range resumes {
-		resume(false)
+		dropped |= resume(false)
 	}
 	s.emit(EventWipChanged, TabEvent{s.ID})
-	if refs {
+	// A working-tree-only write cannot move refs: dropped ref events come
+	// from someone else (a terminal, another tool) and must not be lost.
+	if refs || dropped&watch.Refs != 0 {
 		s.refsChanged()
 	}
 	return err

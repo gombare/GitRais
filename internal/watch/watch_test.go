@@ -328,3 +328,26 @@ func TestRescanSentinelForcesEverything(t *testing.T) {
 		t.Fatalf("got %v, want [WIP|Refs]", g)
 	}
 }
+
+// resume(false) reports what it dropped, so the caller can still act on
+// changes its own write did not cause (e.g. a fetch from a terminal).
+func TestResumeReportsDroppedKinds(t *testing.T) {
+	w, src, _ := newTestWatcher(20 * time.Millisecond)
+	defer w.Close()
+	resume := w.Suspend()
+	src.ch <- []string{"/r/a.txt"}
+	src.hold([]string{"/r/.git/refs/heads/x"}) // delivered by resume's flush
+	if k := resume(false); k != WIP|Refs {
+		t.Fatalf("dropped = %v, want WIP|Refs", k)
+	}
+	resume = w.Suspend()
+	src.ch <- []string{"/r/b.txt"}
+	time.Sleep(10 * time.Millisecond) // classified while still suspended
+	if k := resume(true); k != 0 {
+		t.Fatalf("resume(true) dropped %v", k)
+	}
+	time.Sleep(60 * time.Millisecond) // b.txt delivered
+	if k := w.Suspend()(false); k != 0 {
+		t.Fatalf("nothing happened, dropped = %v", k)
+	}
+}
