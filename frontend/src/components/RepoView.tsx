@@ -15,6 +15,7 @@ const DiffView = lazy(() => import('./DiffView'));
 
 const LEFT = { min: 180, max: 600, def: 260 };
 const RIGHT = { min: 260, max: 700, def: 340 };
+const RESIZER_W = 4; // .resizer width in styles.css
 const clamp = (v: number, r: { min: number; max: number }) => Math.max(r.min, Math.min(r.max, v));
 
 // Paths of tabs closed with the keyboard, most recent last (view:reopenTab).
@@ -89,6 +90,16 @@ export function RepoView({ tab }: { tab: string }) {
       setTimeout(() => window.dispatchEvent(new Event('gitrais:focus-commit-message')), 0);
     },
   } : {});
+
+  // Toasts stay clear of the detail panel (and its commit button): publish its width, resizer
+  // included, while this tab is the active one. Inactive tabs and the Welcome leave it unset.
+  const rightPanelW = showDetail ? layout.rightWidth + RESIZER_W : 0;
+  useEffect(() => {
+    if (!active) return;
+    const root = document.documentElement.style;
+    root.setProperty('--right-panel-w', `${rightPanelW}px`);
+    return () => { root.removeProperty('--right-panel-w'); };
+  }, [active, rightPanelW]);
 
   const persist = () => { void run(api.SaveLayout(latest.current as store.Layout)); };
   // The ref is updated synchronously here, so the onDone() that follows a key

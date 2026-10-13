@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useApp } from './app';
+import { AUTO_DISMISS_MS, toastTimeout, useApp } from './app';
 
 beforeEach(() => useApp.setState({ toasts: [], authQueue: [] }));
 
@@ -9,6 +9,24 @@ describe('useApp', () => {
     expect(useApp.getState().toasts).toHaveLength(0);
     useApp.getState().toast('{"kind":"Timeout","message":"","stderr":""}', 't1');
     expect(useApp.getState().toasts).toHaveLength(1);
+  });
+  it('derives title, severity and collapsed stderr from the error kind', () => {
+    useApp.getState().toast('{"kind":"DirtyWorktree","message":"m","stderr":"error: would be overwritten"}', 't1');
+    useApp.getState().toast('{"kind":"LockRemoved","message":"","stderr":""}', 't1');
+    const [a, b] = useApp.getState().toasts;
+    expect(a).toMatchObject({ severity: 'error', title: 'Modifiche locali', stderr: 'error: would be overwritten', tab: 't1' });
+    expect(b.severity).toBe('success');
+  });
+  it('notify adds a non-error notice', () => {
+    useApp.getState().notify({ severity: 'success', title: 'Copiato', tab: 't' });
+    expect(useApp.getState().toasts[0]).toMatchObject({ severity: 'success', title: 'Copiato', detail: '', tab: 't' });
+  });
+  it('success and info auto-dismiss by default; warnings and errors are sticky', () => {
+    expect(toastTimeout({ severity: 'success' })).toBe(AUTO_DISMISS_MS);
+    expect(toastTimeout({ severity: 'info' })).toBe(AUTO_DISMISS_MS);
+    expect(toastTimeout({ severity: 'warning' })).toBe(0);
+    expect(toastTimeout({ severity: 'error' })).toBe(0);
+    expect(toastTimeout({ severity: 'success', timeout: 1500 })).toBe(1500);
   });
   it('removes a cancelled auth prompt by id', () => {
     const { pushAuth, cancelAuth } = useApp.getState();

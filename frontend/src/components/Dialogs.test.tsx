@@ -105,3 +105,25 @@ describe('Dialogs: optional text and checkbox', () => {
     await expect(p).resolves.toEqual({ text: 'feat', checked: false });
   });
 });
+
+describe('Dialogs: action labels and item lists', () => {
+  it('confirmLabel names the confirm button (confirm and text dialogs)', async () => {
+    render(<DialogHost />);
+    let p!: Promise<boolean>;
+    act(() => { p = confirmAction({ title: 'T', message: 'M', danger: true, confirmLabel: 'Elimina tag' }); });
+    expect(screen.queryByRole('button', { name: 'OK' })).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Elimina tag' })); });
+    await expect(p).resolves.toBe(true);
+    let q!: Promise<string | null>;
+    act(() => { q = askText({ title: 'T', label: 'Nome', initial: 'x', confirmLabel: 'Crea branch' }); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Crea branch' })); });
+    await expect(q).resolves.toBe('x');
+  });
+  it('confirm items render as a list, one entry per line', () => {
+    render(<DialogHost />);
+    act(() => { void confirmAction({ title: 'T', message: 'M', items: ['a.txt', 'dir/b.txt'] }); });
+    const list = screen.getByRole('list', { name: 'Elementi interessati' });
+    expect(Array.from(list.querySelectorAll('li')).map((li) => li.textContent)).toEqual(['a.txt', 'dir/b.txt']);
+    expect(list.className).toBe('modal-list');
+  });
+});

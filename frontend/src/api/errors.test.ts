@@ -24,7 +24,17 @@ describe('describeError', () => {
   });
   it('shows the hook output', () => {
     const d = describeError({ kind: 'HookRejected', message: 'x', stderr: 'lint failed' });
-    expect(d.detail).toContain('lint failed');
+    expect(d.stderr).toBe('lint failed');
+    expect(d.detail).not.toContain('lint failed');
+  });
+  it('classifies notices by severity; unknown kinds are errors', () => {
+    const sev = (kind: string) => describeError({ kind, message: '', stderr: '' }).severity;
+    expect(sev('LockRemoved')).toBe('success');
+    expect(sev('NoLinesSelected')).toBe('info');
+    expect(sev('OpInProgress')).toBe('info');
+    expect(sev('LockInUse')).toBe('warning');
+    expect(sev('AuthFailed')).toBe('error');
+    expect(sev('Whatever')).toBe('error');
   });
   it('describes backend sentinel kinds', () => {
     for (const kind of ['GitMissing', 'Timeout', 'InvalidPath', 'NoTab', 'PullStrategyRequired', 'OpInProgress', 'GitRunning']) {

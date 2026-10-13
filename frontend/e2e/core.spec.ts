@@ -31,9 +31,10 @@ test.afterAll(async () => {
   await page.context().close();
 });
 
-// No error toast or hook error may show up (not role=alert: Monaco has its own empty aria alerts).
+// No error/warning toast or hook error may show up (not role=alert: Monaco has its own empty
+// aria alerts). Success and info notices are fine.
 const noToasts = async () => {
-  const alerts = page.locator('.toasts .toast, .hook-error');
+  const alerts = page.locator('.toasts .toast-error, .toasts .toast-warning, .hook-error');
   await expect(alerts, `unexpected alerts: ${(await alerts.allTextContents()).join(' | ')}`).toHaveCount(0);
 };
 const firstRow = () => page.getByRole('option').first();
@@ -117,7 +118,7 @@ test('create a branch from HEAD and check out another one', async () => {
   await page.getByRole('button', { name: 'Branch', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Nuovo branch da HEAD' });
   await dialog.getByRole('textbox', { name: 'Nome' }).fill('feature/e2e');
-  await dialog.getByRole('button', { name: 'OK' }).click();
+  await dialog.getByRole('button', { name: 'Crea branch' }).click();
   await expect.poll(() => repoGit('branch', '--show-current')).toBe('feature/e2e');
   await expect(page.locator('.left-panel .lp-name', { hasText: /^feature\/e2e$/ })).toBeVisible();
 

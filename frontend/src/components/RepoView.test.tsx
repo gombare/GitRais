@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const api = vi.hoisted(() => ({
   SaveLayout: vi.fn(async (..._a: unknown[]) => undefined),
@@ -35,6 +35,16 @@ describe('RepoView', () => {
     expect(api.SaveLayout).toHaveBeenLastCalledWith({ leftWidth: 276, rightWidth: 340 });
     fireEvent.keyDown(screen.getByRole('separator', { name: 'Larghezza pannello dettagli' }), { key: 'End' });
     expect(api.SaveLayout).toHaveBeenLastCalledWith({ leftWidth: 276, rightWidth: 700 });
+  });
+  it('publishes the detail panel width for the toasts while active, and clears it otherwise', () => {
+    const w = () => document.documentElement.style.getPropertyValue('--right-panel-w');
+    const { unmount } = render(<RepoView tab="t" />);
+    expect(w()).toBe('344px');
+    fireEvent.keyDown(screen.getByRole('separator', { name: 'Larghezza pannello dettagli' }), { key: 'End' });
+    expect(w()).toBe('704px');
+    act(() => useApp.setState({ active: null }));
+    expect(w()).toBe('');
+    unmount();
   });
   it('commitAll aborts without committing when StageAll fails', async () => {
     api.StageAll.mockRejectedValue(new Error('boom'));

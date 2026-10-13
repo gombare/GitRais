@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 
-type Base = { opener: HTMLElement | null };
+// confirmLabel names the action on the confirm button ("Crea branch", "Elimina tag"...); default "OK".
+type Base = { opener: HTMLElement | null; confirmLabel?: string };
 type TextOptions = {
   title: string;
+  confirmLabel?: string;
   label?: string;
   initial?: string;
   // OK is enabled with an empty value too (it resolves ''); Cancel still resolves null.
@@ -14,7 +16,15 @@ export type TextCheck = { text: string; checked: boolean };
 type Dialog =
   | (Base & TextOptions & { kind: 'text'; check?: Check; resolve: (v: TextCheck | null) => void })
   | (Base & { kind: 'choice'; title: string; message: string; options: { value: string; label: string }[]; resolve: (v: string | null) => void })
-  | (Base & { kind: 'confirm'; title: string; message: string; danger?: boolean; resolve: (v: boolean) => void });
+  | (Base & ConfirmOptions & { kind: 'confirm'; resolve: (v: boolean) => void });
+type ConfirmOptions = {
+  title: string;
+  message: string;
+  danger?: boolean;
+  confirmLabel?: string;
+  // Shown as a scrollable monospace list under the message (e.g. the files a discard touches).
+  items?: string[];
+};
 
 const useDialog = create<{ d: Dialog | null }>(() => ({ d: null }));
 
@@ -41,7 +51,7 @@ export function chooseOption(o: { title: string; message: string; options: { val
   return new Promise((resolve) => show({ kind: 'choice', ...o, resolve, opener: opener() }));
 }
 
-export function confirmAction(o: { title: string; message: string; danger?: boolean }): Promise<boolean> {
+export function confirmAction(o: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => show({ kind: 'confirm', ...o, resolve, opener: opener() }));
 }
 
@@ -105,6 +115,11 @@ export function DialogHost() {
         {d.kind === 'text'
           ? <label>{d.label}<input ref={input} autoFocus value={value} onChange={(e) => setValue(e.target.value)} /></label>
           : <p>{d.message}</p>}
+        {d.kind === 'confirm' && d.items && d.items.length > 0 && (
+          <ul className="modal-list" aria-label="Elementi interessati" tabIndex={0}>
+            {d.items.map((it, i) => <li key={i}>{it}</li>)}
+          </ul>
+        )}
         {d.kind === 'text' && d.check && (
           <label className="modal-check">
             <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
@@ -120,7 +135,7 @@ export function DialogHost() {
           {/* Destructive confirms start on Cancel so a stray Enter cannot confirm. */}
           <button type="button" autoFocus={dangerConfirm} onClick={() => close(false)}>Annulla</button>
           {d.kind !== 'choice' && <button type="submit" autoFocus={d.kind === 'confirm' && !dangerConfirm} disabled={empty}
-            className={d.kind === 'confirm' && d.danger ? 'danger' : 'primary'}>OK</button>}
+            className={d.kind === 'confirm' && d.danger ? 'danger' : 'primary'}>{d.confirmLabel || 'OK'}</button>}
         </div>
       </form>
     </div>

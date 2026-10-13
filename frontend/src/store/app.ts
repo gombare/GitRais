@@ -1,10 +1,23 @@
 import { create } from 'zustand';
 import { api, parseError, type AuthPrompt, type UIError } from '../api/client';
-import { isSilent } from '../api/errors';
+import { describeError, isSilent, type ErrorAction, type Severity } from '../api/errors';
 import type { app, store } from '../../wailsjs/go/models';
 import { useRepo, clearStatusSeq } from './repo';
 
-export type Toast = { id: number; tab?: string; error: UIError };
+// A notification. `tab` scopes it to one repository tab (shown only while that tab is active);
+// without it the toast is global. `timeout` in ms overrides the per-severity default (0 = sticky).
+export type Toast = {
+  id: number; tab?: string; severity: Severity; title: string; detail: string; stderr: string;
+  action: ErrorAction; error: UIError; timeout?: number;
+};
+export type Notice = { severity: Severity; title: string; detail?: string; tab?: string; timeout?: number };
+
+// Success and info notices go away on their own; warnings and errors stay until dismissed.
+export const AUTO_DISMISS_MS = 5000;
+export function toastTimeout(t: Pick<Toast, 'severity' | 'timeout'>): number {
+  if (t.timeout !== undefined) return t.timeout;
+  return t.severity === 'success' || t.severity === 'info' ? AUTO_DISMISS_MS : 0;
+}
 export type OpState = { op: string; phase: string; percent: number } | null;
 
 type AppStore = {
@@ -25,7 +38,10 @@ type AppStore = {
   activate(id: string): void;
   addTab(tab: app.TabInfo): void;
   reloadState(): Promise<void>;
+  // Shows a failure (a UIError, an Error carrying one, or any value); its severity comes from its kind.
   toast(e: unknown, tab?: string): void;
+  // Shows a non-error notice (e.g. "Copiato", "Push completato").
+  notify(n: Notice): void;
   dismiss(id: number): void;
   setOp(tab: string, op: OpState): void;
   // Applies an `op:progress` event: ignored unless the op was started through runOp on a live tab.
@@ -131,7 +147,15 @@ export const useApp = create<AppStore>((set, get) => ({
   toast(e, tab) {
     const error = parseError(e);
     if (isSilent(error)) return;
-    set((s) => ({ toasts: [...s.toasts, { id: nextToast++, tab, error }] }));
+    const d = describeError(error);
+    set((s) => ({ toasts: [...s.toasts, { id: nextToast++, tab, error, ...d }] }));
+  },
+  notify({ severity, title, detail = '', tab, timeout }) {
+    const t: Toast = {
+      id: nextToast++, tab, severity, title, detail, stderr: '', action: null,
+      error: { kind: 'Notice', message: title, stderr: '' }, timeout,
+    };
+    set((s) => ({ toasts: [...s.toasts, t] }));
   },
   dismiss(id) {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));

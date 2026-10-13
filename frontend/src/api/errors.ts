@@ -1,6 +1,24 @@
 import type { UIError } from './client';
 
 export type ErrorAction = 'pull' | 'removeLock' | null;
+export type Severity = 'error' | 'warning' | 'success' | 'info';
+
+// Kinds that are not failures: notices and "nothing to do" outcomes. Everything else is an error.
+const severities: Record<string, Severity> = {
+  LockRemoved: 'success',
+  NoLinesSelected: 'info',
+  OpInProgress: 'info',
+  NothingToCommit: 'info',
+  NothingToAmend: 'info',
+  NothingToStash: 'info',
+  ClipboardUnavailable: 'warning',
+  LockInUse: 'warning',
+  LockTooRecent: 'warning',
+  GitRunning: 'warning',
+  LsofMissing: 'warning',
+  StateCorrupt: 'warning',
+  DiffChanged: 'warning',
+};
 
 const texts: Record<string, [string, string, ErrorAction]> = {
   AuthFailed: ['Autenticazione fallita', 'Credenziali rifiutate dal remote.', null],
@@ -8,8 +26,8 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   Conflict: ['Conflitti', "L'operazione ha prodotto conflitti da risolvere.", null],
   DirtyWorktree: ['Modifiche locali', 'Le modifiche locali verrebbero sovrascritte: fai commit o stash.', null],
   Locked: ['Repository bloccato', 'Un altro processo git sta usando il repository (index.lock).', 'removeLock'],
-  // Informational: shown after a successful lock removal.
   ClipboardUnavailable: ['Appunti non disponibili', 'Impossibile copiare negli appunti.', null],
+  // Informational: shown after a successful lock removal.
   LockRemoved: ['Lock rimosso: riprova l’operazione', 'index.lock è stato rimosso.', null],
   LockInUse: ['Lock in uso', 'Un processo sta ancora usando index.lock: attendi la fine dell’operazione.', null],
   LockTooRecent: ['Lock appena creato', 'index.lock è stato creato pochi secondi fa: un’operazione git potrebbe essere in corso. Riprova tra poco.', null],
@@ -50,9 +68,16 @@ export function isSilent(e: UIError): boolean {
   return e.kind === 'Cancelled';
 }
 
-export function describeError(e: UIError): { title: string; detail: string; action: ErrorAction } {
+export function severityOf(e: UIError): Severity {
+  return severities[e.kind] ?? 'error';
+}
+
+// User-facing text for an error. `stderr` is git's raw (English) output, kept apart so the
+// UI can show it collapsed; an unknown kind falls back to the raw message.
+export function describeError(e: UIError): { title: string; detail: string; stderr: string; action: ErrorAction; severity: Severity } {
   const t = texts[e.kind];
-  const extra = e.stderr.trim();
-  if (!t) return { title: 'Errore', detail: extra || e.message, action: null };
-  return { title: t[0], detail: extra ? `${t[1]}\n\n${extra}` : t[1], action: t[2] };
+  const stderr = e.stderr.trim();
+  const severity = severityOf(e);
+  if (!t) return { title: 'Errore', detail: e.message || (stderr ? '' : 'Operazione non riuscita.'), stderr, action: null, severity };
+  return { title: t[0], detail: t[1], stderr, action: t[2], severity };
 }
