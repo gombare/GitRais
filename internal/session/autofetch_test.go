@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -512,4 +513,100 @@ func TestAutoFetchStatusEvents(t *testing.T) {
 }
 
 // armAutoFetch marks the session as if a manual remote operation had succeeded.
-func (s *Session) armAutoFetch() { s.manualRemoteDone(nil, false) }
+func (s *Session) armAutoFetch() { s.manualRemoteDone(nil, false, false) }
+
+// UI wave 2A: the time of the last successful fetch (manual Fetch or Pull, or
+// auto-fetch) is reported in the status and in autofetch:status events. A push
+// does not fetch, so it does not count.
+func TestAutoFetchLastFetch(t *testing.T) {
+	var fail atomic.Bool
+	calls := countFetches(t, func(context.Context, *gitexec.Runner, string) error {
+		if fail.Load() {
+			return errors.New("boom")
+		}
+		return nil
+	})
+	repo, _ := remoteWithNewCommit(t)
+	s, rec := open(t, repo)
+	if st := s.AutoFetchStatus(); st.LastFetch != 0 {
+		t.Fatalf("no fetch yet: %+v", st)
+	}
+	if err := s.PushCurrent(false); err != nil {
+		t.Fatal(err)
+	}
+	if st := s.AutoFetchStatus(); st.LastFetch != 0 {
+		t.Fatalf("push is not a fetch: %+v", st)
+	}
+	before := time.Now().Unix()
+	if err := s.Fetch(); err != nil {
+		t.Fatal(err)
+	}
+	st := s.AutoFetchStatus()
+	if st.LastFetch < before || st.LastFetch > time.Now().Unix() {
+		t.Fatalf("lastFetch after Fetch = %d (before %d)", st.LastFetch, before)
+	}
+	lastEvent := func() AutoFetchEvent {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		for i := len(rec.events) - 1; i >= 0; i-- {
+			if rec.events[i] == EventAutoFetchStatus {
+				return rec.data[i].(AutoFetchEvent)
+			}
+		}
+		return AutoFetchEvent{}
+	}
+	if ev := lastEvent(); ev.LastFetch != st.LastFetch {
+		t.Fatalf("event %+v, status %+v", ev, st)
+	}
+	// An auto-fetch success updates it (and is reported) even when nothing moved.
+	s.afMu.Lock()
+	s.afLastFetch = 1
+	s.afMu.Unlock()
+	s.SetAutoFetch(afTick)
+	waitUntil(t, "auto-fetch lastFetch", func() bool { return calls.Load() > 0 && s.AutoFetchStatus().LastFetch > 1 })
+	waitUntil(t, "auto-fetch lastFetch event", func() bool { return lastEvent().LastFetch > 1 })
+	// A failed fetch leaves it alone.
+	s.SetAutoFetch(0)
+	fail.Store(true)
+	s.afMu.Lock()
+	s.afLastFetch = 1
+	s.afMu.Unlock()
+	n := calls.Load()
+	s.SetAutoFetch(afTick)
+	waitUntil(t, "failed auto-fetch", func() bool { return calls.Load() > n })
+	s.SetAutoFetch(0)
+	if got := s.AutoFetchStatus().LastFetch; got != 1 {
+		t.Fatalf("failed fetch changed lastFetch to %d", got)
+	}
+}
+
+// A ref changed by someone else just before an auto-fetch tick must still be
+// reported. Its file event may arrive only after the watchers were suspended
+// (and be dropped with the fetch's own events) while the change is in both
+// snapshots: the watchers are flushed before suspending, so the event is
+// pending, not held, and is delivered after the fetch.
+func TestAutoFetchKeepsRefChangeJustBeforeTick(t *testing.T) {
+	countFetches(t, func(context.Context, *gitexec.Runner, string) error { return nil })
+	origRand := afRand
+	afRand = func() float64 { return 0.999 } // the loop's own first tick is an hour away
+	t.Cleanup(func() { afRand = origRand })
+	repo, _ := remoteWithNewCommit(t)
+	s, rec := open(t, repo)
+	rec.waitFor(t, EventGraphProgress, func(d any) bool { return d.(GraphProgress).Done })
+	time.Sleep(2 * watchDebounce)
+	s.armAutoFetch()
+	s.SetAutoFetch(time.Hour)
+	for i := range 4 {
+		before := rec.count(EventRefsChanged)
+		repo.Git("branch", fmt.Sprintf("external-%d", i))
+		s.autoFetchTick()
+		deadline := time.Now().Add(10 * watchDebounce)
+		for rec.count(EventRefsChanged) == before {
+			if time.Now().After(deadline) {
+				t.Fatalf("round %d: the external branch was never reported", i)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(2 * watchDebounce) // settle before the next round
+	}
+}

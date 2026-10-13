@@ -28,7 +28,9 @@ import (
 // dropped), and refs:changed (with a graph reload) is emitted only when a
 // snapshot of all refs and HEAD differs before and after the fetch. The
 // snapshot also catches refs moved by someone else while the watchers were
-// suspended; dropped working-tree events are forwarded as wip:changed.
+// suspended; dropped working-tree events are forwarded as wip:changed. The
+// watchers are flushed right before being suspended, so a change made before
+// the first snapshot is never dropped as if it were the fetch's own.
 //
 // It starts only once a manual remote operation (Fetch, Pull, PullAutostash,
 // PushCurrent) has succeeded in this session, so that any credential dialog
@@ -79,6 +81,9 @@ type AutoFetchStatus struct {
 	IntervalSeconds int    `json:"intervalSeconds"`
 	Paused          bool   `json:"paused"`
 	Reason          string `json:"reason"` // PauseAuth | PauseNetwork | PauseWaitingManual | ""
+	// LastFetch is the time (unix seconds) of the last successful fetch in
+	// this session: a manual Fetch or Pull, or an auto-fetch; 0 = none yet.
+	LastFetch int64 `json:"lastFetch"`
 }
 
 // AutoFetchEvent is the payload of EventAutoFetchStatus.
@@ -87,6 +92,8 @@ type AutoFetchEvent struct {
 	Enabled bool   `json:"enabled"`
 	Paused  bool   `json:"paused"`
 	Reason  string `json:"reason"`
+	// LastFetch: see AutoFetchStatus.LastFetch.
+	LastFetch int64 `json:"lastFetch"`
 }
 
 // autoFetchDelay is the wait before the next tick for interval iv and a random
@@ -119,7 +126,7 @@ func (s *Session) AutoFetchStatus() AutoFetchStatus {
 
 func (s *Session) autoFetchStatusLocked() AutoFetchStatus {
 	st := AutoFetchStatus{Enabled: s.afInterval > 0, IntervalSeconds: int(s.afInterval / time.Second),
-		Paused: s.afPaused, Reason: s.afReason}
+		Paused: s.afPaused, Reason: s.afReason, LastFetch: s.afLastFetch}
 	if !s.afPaused && !s.afArmed {
 		st.Paused, st.Reason = true, PauseWaitingManual
 	}
@@ -127,13 +134,13 @@ func (s *Session) autoFetchStatusLocked() AutoFetchStatus {
 }
 
 // notifyAutoFetch emits autofetch:status when the visible state (enabled,
-// paused, reason) differs from the last one emitted. afEmitMu keeps the
+// paused, reason, last fetch time) differs from the last one emitted. afEmitMu keeps the
 // events in state order.
 func (s *Session) notifyAutoFetch() {
 	s.afEmitMu.Lock()
 	defer s.afEmitMu.Unlock()
 	st := s.AutoFetchStatus()
-	ev := AutoFetchEvent{Tab: s.ID, Enabled: st.Enabled, Paused: st.Paused, Reason: st.Reason}
+	ev := AutoFetchEvent{Tab: s.ID, Enabled: st.Enabled, Paused: st.Paused, Reason: st.Reason, LastFetch: st.LastFetch}
 	if s.afNotified && ev == s.afLast {
 		return
 	}
@@ -142,13 +149,17 @@ func (s *Session) notifyAutoFetch() {
 }
 
 // manualRemoteDone records the outcome of a manual remote operation: success
-// arms the auto-fetch and, when resume is set (Fetch), clears a pause.
-func (s *Session) manualRemoteDone(err error, resume bool) {
+// arms the auto-fetch, records the fetch time when the operation fetched
+// (Fetch, Pull) and, when resume is set (Fetch), clears a pause.
+func (s *Session) manualRemoteDone(err error, resume, fetched bool) {
 	if err != nil {
 		return
 	}
 	s.afMu.Lock()
 	s.afArmed = true
+	if fetched {
+		s.afLastFetch = time.Now().Unix()
+	}
 	if resume {
 		s.afPaused, s.afReason = false, ""
 	}
@@ -229,9 +240,12 @@ func (s *Session) autoFetchTick() {
 	s.afMu.Lock()
 	s.afCancel, s.afDone = nil, nil
 	paused := s.afPaused
+	fetchedAt := s.afLastFetch
 	switch {
-	case err == nil, errors.Is(err, context.Canceled):
-		// success, or yielded to a write / closed: nothing to record
+	case err == nil:
+		s.afLastFetch = time.Now().Unix()
+	case errors.Is(err, context.Canceled):
+		// yielded to a write / closed: nothing to record
 	case errors.Is(err, context.DeadlineExceeded):
 		s.afPaused, s.afReason = true, PauseNetwork
 	case gitexec.KindOf(err) == gitexec.KindAuthFailed:
@@ -239,7 +253,7 @@ func (s *Session) autoFetchTick() {
 	case gitexec.KindOf(err) == gitexec.KindNetwork:
 		s.afPaused, s.afReason = true, PauseNetwork
 	}
-	changed := s.afPaused != paused
+	changed := s.afPaused != paused || s.afLastFetch != fetchedAt
 	s.afMu.Unlock()
 	yield()
 	close(done)
@@ -266,6 +280,13 @@ func (s *Session) autoFetch(ctx context.Context) (moved bool, err error) {
 	before, berr := s.refSnapshot(ctx)
 	if ctx.Err() != nil {
 		return false, context.Canceled
+	}
+	// Flush before suspending: a change made before the snapshot whose event
+	// is still travelling would otherwise arrive while suspended and be dropped
+	// with the fetch's own events, while the snapshots (both containing it)
+	// show no difference. Flushed, it is pending and delivered after resume.
+	for _, w := range s.watchers {
+		w.Flush()
 	}
 	resumes := make([]func(bool) watch.Kind, 0, len(s.watchers))
 	for _, w := range s.watchers {

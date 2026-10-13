@@ -258,7 +258,7 @@ func (s *Session) StashDrop(ctx context.Context, hash string) error {
 // auto-fetch (see manualRemoteDone) and resumes it if paused.
 func (s *Session) Fetch() error {
 	err := s.remote(context.Background(), "fetch", func(c context.Context, p ops.OnProgress) error { return ops.Fetch(c, s.r, s.Dir, p) })
-	s.manualRemoteDone(err, true)
+	s.manualRemoteDone(err, true, true)
 	return err
 }
 
@@ -266,7 +266,7 @@ func (s *Session) Fetch() error {
 // choose a mode when branches diverged.
 func (s *Session) Pull(mode ops.PullMode) error {
 	err := s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error { return ops.Pull(c, s.r, s.Dir, mode, p) })
-	s.manualRemoteDone(err, false)
+	s.manualRemoteDone(err, false, true)
 	return err
 }
 
@@ -278,7 +278,7 @@ func (s *Session) PullAutostash(mode ops.PullMode) error {
 	err := s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error {
 		return ops.PullAutostash(c, s.r, s.Dir, mode, p)
 	})
-	s.manualRemoteDone(err, false)
+	s.manualRemoteDone(err, false, true)
 	return err
 }
 
@@ -293,7 +293,7 @@ func (s *Session) PushCurrent(force bool) error {
 		return err
 	}
 	err = s.remote(context.Background(), "push", func(c context.Context, p ops.OnProgress) error { return ops.Push(c, s.r, s.Dir, o, p) })
-	s.manualRemoteDone(err, false)
+	s.manualRemoteDone(err, false, false)
 	return err
 }
 

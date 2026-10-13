@@ -141,9 +141,10 @@ type Session struct {
 	afArmed    bool           // a manual remote operation succeeded
 	afWG       sync.WaitGroup // the auto-fetch loop
 
-	afEmitMu   sync.Mutex // serializes autofetch:status events
-	afNotified bool
-	afLast     AutoFetchEvent
+	afLastFetch int64      // unix seconds of the last successful fetch (manual or automatic), 0 = none
+	afEmitMu    sync.Mutex // serializes autofetch:status events
+	afNotified  bool
+	afLast      AutoFetchEvent
 }
 
 // Open opens the repository containing dir and starts loading its graph (and,

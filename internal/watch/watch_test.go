@@ -351,3 +351,25 @@ func TestResumeReportsDroppedKinds(t *testing.T) {
 		t.Fatalf("nothing happened, dropped = %v", k)
 	}
 }
+
+// Flush before Suspend: a change the OS has not delivered yet becomes pending,
+// so resume(false) does not drop it with the suspended span's own events.
+func TestFlushBeforeSuspendKeepsEarlierChanges(t *testing.T) {
+	src := &fakeSource{ch: make(chan []string)}
+	emit, got := collect()
+	w := New("/r", "/r/.git", src, 20*time.Millisecond, nil, emit)
+	defer w.Close()
+	src.hold([]string{"/r/.git/refs/heads/other"})
+	w.Flush()
+	resume := w.Suspend()
+	src.ch <- []string{"/r/a.txt"} // the suspended writer's own change
+	if dropped := resume(false); dropped != WIP {
+		t.Fatalf("dropped %v, want only WIP", dropped)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if g := got(); len(g) != 1 || g[0] != Refs {
+		t.Fatalf("got %v, want the earlier Refs change", g)
+	}
+	w.Close()
+	w.Flush() // closed: returns at once
+}

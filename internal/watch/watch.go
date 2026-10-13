@@ -131,6 +131,18 @@ func (w *Watcher) barrier() {
 	}
 }
 
+// Flush returns once every change made before the call has been classified:
+// its notification is then pending (or held, while suspended), never in
+// flight. A caller about to Suspend and drop its own events calls it first so
+// earlier changes by others are not dropped with them. It must not be called
+// from emit or ignore; it returns at once on a closed watcher.
+func (w *Watcher) Flush() {
+	if w.closed.Load() {
+		return
+	}
+	w.barrier()
+}
+
 func (w *Watcher) add(k Kind) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
