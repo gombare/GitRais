@@ -91,6 +91,7 @@ const watchDebounce = 300 * time.Millisecond
 //     is cancellable with CancelOp, also while waiting for the write lock.
 type Session struct {
 	ID, Dir, GitDir string
+	commonDir       string
 
 	r      *gitexec.Runner
 	emitFn Emitter
@@ -107,6 +108,8 @@ type Session struct {
 
 	idx atomic.Pointer[graph.Index]
 
+	cgRunning atomic.Bool // a background commit-graph write is running
+
 	loadMu     sync.Mutex // guards loadGen, loadCancel, loadClosed, loadWG.Add and writeWG.Add
 	loadGen    uint64
 	loadCancel context.CancelFunc
@@ -122,8 +125,9 @@ type Session struct {
 	watchers []*watch.Watcher
 }
 
-// Open opens the repository containing dir and starts loading its graph. The
-// returned Session must be closed with Close.
+// Open opens the repository containing dir and starts loading its graph (and,
+// when the repository has none, writing its commit-graph in the background).
+// The returned Session must be closed with Close.
 func Open(id, dir string, r *gitexec.Runner, emit Emitter) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wctx, wcancel := context.WithCancel(context.Background())
@@ -134,6 +138,7 @@ func Open(id, dir string, r *gitexec.Runner, emit Emitter) (*Session, error) {
 		return nil, err
 	}
 	s.Reload()
+	s.startCommitGraph()
 	return s, nil
 }
 
@@ -150,7 +155,7 @@ func (s *Session) open(dir string) error {
 	if err != nil {
 		return err
 	}
-	s.Dir, s.GitDir = top, gitDir
+	s.Dir, s.GitDir, s.commonDir = top, gitDir, commonDir
 
 	// The worktree and its git dir; the git dir needs its own path when it does
 	// not live under the worktree (linked worktree, --separate-git-dir).
@@ -193,8 +198,9 @@ func revParse(ctx context.Context, r *gitexec.Runner, dir string, flags ...strin
 	return filepath.EvalSymlinks(strings.TrimSpace(string(out)))
 }
 
-// Close stops the watchers and cancels the graph load, the remote operation
-// and the writes still waiting for the write lock at once. A local write
+// Close stops the watchers and cancels the graph load, the commit-graph
+// write, the remote operation and the writes still waiting for the write lock
+// at once. A local write
 // already running is given closeGrace to finish (killing git half-way through
 // a checkout or a commit hook is worse than waiting), then cancelled. Close
 // waits for all of them. Nothing is emitted once Close has started, and no

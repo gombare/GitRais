@@ -921,3 +921,92 @@ func TestOpenRepoWithExtensions(t *testing.T) {
 		}
 	}
 }
+
+// TestMain disables the background commit-graph write by default: it reloads
+// the graph, which would add events to tests that count them.
+func TestMain(m *testing.M) {
+	autoCommitGraph = false
+	os.Exit(m.Run())
+}
+
+func enableCommitGraph(t *testing.T) {
+	autoCommitGraph = true
+	t.Cleanup(func() { autoCommitGraph = false })
+}
+
+// Opening a repository without a commit-graph writes one in the background
+// and reloads the graph once it is there.
+func TestOpenWritesCommitGraph(t *testing.T) {
+	enableCommitGraph(t)
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	repo.CommitAll("two")
+	info := filepath.Join(repo.Dir, ".git", "objects", "info")
+	for _, p := range []string{"commit-graph", "commit-graphs"} {
+		if _, err := os.Stat(filepath.Join(info, p)); err == nil {
+			t.Fatalf("%s already exists", p)
+		}
+	}
+	s, rec := open(t, repo)
+	deadline := time.Now().Add(10 * time.Second)
+	for rec.count("graph:reset") < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("no reload after the commit-graph write: %v", rec.events)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(info, "commit-graphs", "commit-graph-chain")); err != nil {
+		t.Fatalf("commit-graph not written: %v", err)
+	}
+	rec.waitFor(t, "graph:progress", graphDone(2))
+	if n, _ := s.GraphInfo(); n != 2 {
+		t.Fatalf("rows = %d", n)
+	}
+
+	// Already present: a second session does not write (nor reload) again.
+	rec2 := newRecorder()
+	s2, err := Open("t2", repo.Dir, repo.R, rec2.emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	rec2.waitFor(t, "graph:progress", graphDone(2))
+	time.Sleep(300 * time.Millisecond)
+	if n := rec2.count("graph:reset"); n != 1 {
+		t.Fatalf("graph:reset = %d with an existing commit-graph", n)
+	}
+}
+
+// Close cancels a running commit-graph write and waits for it.
+func TestCloseCancelsCommitGraphWrite(t *testing.T) {
+	enableCommitGraph(t)
+	started, cancelled := make(chan struct{}), make(chan struct{})
+	writeCommitGraph = func(ctx context.Context, r *gitexec.Runner, dir string) error {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		return ctx.Err()
+	}
+	t.Cleanup(func() { writeCommitGraph = runCommitGraphWrite })
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	s, rec := open(t, repo)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("commit-graph write not started")
+	}
+	start := time.Now()
+	s.Close()
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("Close took %v", d)
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("Close returned before the commit-graph write ended")
+	}
+	if n := rec.count("graph:reset"); n > 1 {
+		t.Fatalf("reload after a cancelled commit-graph write: %d resets", n)
+	}
+}
