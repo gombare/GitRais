@@ -123,7 +123,12 @@ type CheckoutTarget struct {
 // Kind "local" never guesses: a missing local branch is an error even when a
 // remote branch of that name exists (use Kind "remote" for that). A remote
 // checkout switches to an existing local branch of the same short name even if
-// it tracks a different upstream, and does not fast-forward it.
+// it tracks a different upstream. When that local branch is strictly behind the
+// remote-tracking ref (an ancestor of it, and different) it is then
+// fast-forwarded with `merge --ff-only`; a branch that is equal, ahead or
+// diverged is left where it is. The local branch is never reset, so no commit
+// is ever dropped. If the fast-forward fails (e.g. local changes in the way)
+// the switch has still happened and the error is returned.
 func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarget) error {
 	switch t.Kind {
 	case "local":
@@ -146,7 +151,18 @@ func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarg
 		}
 		_, err = r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"show-ref", "--verify", "-q", "refs/heads/" + local}, Env: gitexec.ReadOnlyEnv})
 		if err == nil {
-			return run(ctx, r, dir, "switch", "--end-of-options", local)
+			behind, err := strictlyBehind(ctx, r, dir, "refs/heads/"+local, "refs/remotes/"+t.Name)
+			if err != nil {
+				return err
+			}
+			if err := run(ctx, r, dir, "switch", "--end-of-options", local); err != nil {
+				return err
+			}
+			if !behind {
+				return nil
+			}
+			_, err = r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"merge", "--ff-only", "--no-edit", "--end-of-options", "refs/remotes/" + t.Name}, Env: noEditorEnv})
+			return err
 		}
 		if gitexec.ExitCode(err) != 1 {
 			return err
@@ -154,6 +170,33 @@ func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarg
 		return run(ctx, r, dir, "switch", "--track", "-c", local, "--end-of-options", "refs/remotes/"+t.Name)
 	}
 	return fmt.Errorf("unknown checkout kind: %q", t.Kind)
+}
+
+// strictlyBehind reports whether ref a is a proper ancestor of ref b (a
+// fast-forward from a to b is possible and moves a).
+func strictlyBehind(ctx context.Context, r *gitexec.Runner, dir, a, b string) (bool, error) {
+	h := make([]string, 2)
+	for i, ref := range []string{a, b} {
+		out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"rev-parse", "--verify", "-q", "--end-of-options", ref + "^{commit}"}, Env: gitexec.ReadOnlyEnv})
+		if gitexec.ExitCode(err) == 1 {
+			return false, nil // a missing ref: nothing to fast-forward
+		}
+		if err != nil {
+			return false, err
+		}
+		h[i] = strings.TrimSpace(string(out))
+	}
+	if h[0] == h[1] {
+		return false, nil
+	}
+	_, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"merge-base", "--is-ancestor", h[0], h[1]}, Env: gitexec.ReadOnlyEnv})
+	if err == nil {
+		return true, nil
+	}
+	if gitexec.ExitCode(err) == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // remoteShortName strips the remote prefix from "remote/branch". Remote names

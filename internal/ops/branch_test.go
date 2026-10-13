@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -254,5 +255,80 @@ func TestCreateBranchEmptyStartIsHEAD(t *testing.T) {
 	}
 	if strings.TrimSpace(repo.Git("branch", "--show-current")) != "b" {
 		t.Fatal("branch b not checked out")
+	}
+}
+
+// remoteTopicClone returns (upstream repo a, clone b) where b has a local
+// topic branch tracking origin/topic, and b is on main.
+func remoteTopicClone(t *testing.T) (a, b *testutil.Repo) {
+	t.Helper()
+	a = testutil.NewRepo(t)
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "origin", "main", "main:topic")
+	a.Git("fetch", "-q", "origin")
+	b = testutil.NewRepoWith(t, a.R)
+	b.Git("remote", "add", "origin", bare)
+	b.Git("fetch", "-q", "origin")
+	b.Git("switch", "-q", "-c", "main", "origin/main")
+	b.Git("branch", "-q", "--track", "topic", "origin/topic")
+	return a, b
+}
+
+func TestCheckoutRemoteFastForwardsBehindLocal(t *testing.T) {
+	a, b := remoteTopicClone(t)
+	a.Git("switch", "-q", "-c", "topic", "origin/topic")
+	a.Write("t.txt", "t\n")
+	a.CommitAll("remote topic work")
+	a.Git("push", "-q", "origin", "topic")
+	b.Git("fetch", "-q", "origin")
+	if err := Checkout(bg, b.R, b.Dir, CheckoutTarget{Kind: "remote", Name: "origin/topic"}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Git("branch", "--show-current") != "topic" {
+		t.Fatal("not on topic")
+	}
+	if b.Git("rev-parse", "topic") != b.Git("rev-parse", "origin/topic") {
+		t.Fatal("topic was not fast-forwarded to origin/topic")
+	}
+	if _, err := os.Stat(b.Path("t.txt")); err != nil {
+		t.Fatalf("working tree not updated: %v", err)
+	}
+}
+
+func TestCheckoutRemoteKeepsDivergedLocal(t *testing.T) {
+	a, b := remoteTopicClone(t)
+	a.Git("switch", "-q", "-c", "topic", "origin/topic")
+	a.CommitAll("remote topic work")
+	a.Git("push", "-q", "origin", "topic")
+	b.Git("fetch", "-q", "origin")
+	b.Git("switch", "-q", "topic")
+	local := b.CommitAll("local topic work")
+	b.Git("switch", "-q", "main")
+	if err := Checkout(bg, b.R, b.Dir, CheckoutTarget{Kind: "remote", Name: "origin/topic"}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Git("branch", "--show-current") != "topic" || b.Git("rev-parse", "topic") != local {
+		t.Fatal("diverged local branch must be switched to without moving")
+	}
+}
+
+func TestCheckoutRemoteEqualOrAheadUnchanged(t *testing.T) {
+	_, b := remoteTopicClone(t)
+	equal := b.Git("rev-parse", "topic")
+	if err := Checkout(bg, b.R, b.Dir, CheckoutTarget{Kind: "remote", Name: "origin/topic"}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Git("branch", "--show-current") != "topic" || b.Git("rev-parse", "topic") != equal {
+		t.Fatal("equal: branch moved")
+	}
+	ahead := b.CommitAll("ahead")
+	b.Git("switch", "-q", "main")
+	if err := Checkout(bg, b.R, b.Dir, CheckoutTarget{Kind: "remote", Name: "origin/topic"}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Git("rev-parse", "topic") != ahead {
+		t.Fatal("ahead: branch moved")
 	}
 }
