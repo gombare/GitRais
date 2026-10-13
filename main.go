@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"log"
+	"runtime/debug"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/menu"
@@ -17,6 +18,12 @@ import (
 var assets embed.FS
 
 func main() {
+	// Soft heap limit: the graph index of a very large repository is the main
+	// allocation, and without a limit the GC lets the heap grow to twice the
+	// live set before collecting. 400 MiB keeps a 1M-commit repository well
+	// within it while making the GC work harder only when memory is tight.
+	debug.SetMemoryLimit(400 << 20)
+
 	a := app.New()
 	// The Edit menu is required for copy/paste inside the WebView. Repository
 	// commands live in the toolbar and in keyboard shortcuts handled by the
