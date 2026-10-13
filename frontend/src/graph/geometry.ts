@@ -1,4 +1,5 @@
-export const ROW_H = 28;
+// Row height in CSS px; must match --row-h in styles.css (checked by geometry.test.ts).
+export const ROW_H = 30;
 export const LANE_W = 14;
 export const GRAPH_PAD = 10;
 export const NODE_R = 5;
