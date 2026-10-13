@@ -254,20 +254,20 @@ func (s *Session) StashDrop(ctx context.Context, hash string) error {
 }
 
 // Fetch fetches all remotes. Remote operation: exclusive (ErrOpInProgress),
-// cancellable with CancelOp, progress as op:progress. Success resumes a paused
-// auto-fetch.
+// cancellable with CancelOp, progress as op:progress. Success starts the
+// auto-fetch (see manualRemoteDone) and resumes it if paused.
 func (s *Session) Fetch() error {
 	err := s.remote(context.Background(), "fetch", func(c context.Context, p ops.OnProgress) error { return ops.Fetch(c, s.r, s.Dir, p) })
-	if err == nil {
-		s.resumeAutoFetch()
-	}
+	s.manualRemoteDone(err, true)
 	return err
 }
 
 // Pull pulls the current branch; ops.ErrPullStrategyRequired asks the user to
 // choose a mode when branches diverged.
 func (s *Session) Pull(mode ops.PullMode) error {
-	return s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error { return ops.Pull(c, s.r, s.Dir, mode, p) })
+	err := s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error { return ops.Pull(c, s.r, s.Dir, mode, p) })
+	s.manualRemoteDone(err, false)
+	return err
 }
 
 // PullAutostash is Pull with git's --autostash: local changes are stashed and
@@ -275,9 +275,11 @@ func (s *Session) Pull(mode ops.PullMode) error {
 // re-application conflicts (the stash entry is kept). Opt-in only: the UI
 // offers it after Pull failed with KindDirtyWorktree.
 func (s *Session) PullAutostash(mode ops.PullMode) error {
-	return s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error {
+	err := s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error {
 		return ops.PullAutostash(c, s.r, s.Dir, mode, p)
 	})
+	s.manualRemoteDone(err, false)
+	return err
 }
 
 // PushCurrent pushes the current branch to its upstream or, when it has none,
@@ -290,7 +292,9 @@ func (s *Session) PushCurrent(force bool) error {
 	if err != nil {
 		return err
 	}
-	return s.remote(context.Background(), "push", func(c context.Context, p ops.OnProgress) error { return ops.Push(c, s.r, s.Dir, o, p) })
+	err = s.remote(context.Background(), "push", func(c context.Context, p ops.OnProgress) error { return ops.Push(c, s.r, s.Dir, o, p) })
+	s.manualRemoteDone(err, false)
+	return err
 }
 
 func (s *Session) pushTarget(ctx context.Context, force bool) (ops.PushOptions, error) {

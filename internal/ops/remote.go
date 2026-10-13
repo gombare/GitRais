@@ -66,7 +66,9 @@ const backgroundSSHCommand = "ssh -o BatchMode=yes"
 // their own: GIT_SSH_COMMAND would override it anyway, and core.sshCommand
 // would override GIT_SSH and a configured core.sshCommand, which must be kept.
 func backgroundFetchArgs(ctx context.Context, r *gitexec.Runner, dir string) ([]string, error) {
-	args := []string{"fetch", "--all", "--prune", "--quiet"}
+	// No FETCH_HEAD and no auto-maintenance: a fetch that brings nothing
+	// writes nothing in the repository.
+	args := []string{"fetch", "--all", "--prune", "--quiet", "--no-write-fetch-head", "--no-auto-maintenance"}
 	if envSet(r, "GIT_SSH_COMMAND") || envSet(r, "GIT_SSH") {
 		return args, nil
 	}

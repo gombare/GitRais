@@ -35,6 +35,9 @@ const (
 	EventWipChanged    = "wip:changed"    // TabEvent: working tree / index changed
 	EventRefsChanged   = "refs:changed"   // TabEvent: branches, tags, HEAD, stashes changed
 	EventOpProgress    = "op:progress"    // OpProgress
+	// EventAutoFetchStatus: AutoFetchEvent, on every change of the auto-fetch
+	// state (enabled, paused, reason).
+	EventAutoFetchStatus = "autofetch:status"
 )
 
 type TabEvent struct {
@@ -135,7 +138,12 @@ type Session struct {
 	afDone     chan struct{} // closed when the running auto-fetch has stopped
 	afPaused   bool
 	afReason   string
+	afArmed    bool           // a manual remote operation succeeded
 	afWG       sync.WaitGroup // the auto-fetch loop
+
+	afEmitMu   sync.Mutex // serializes autofetch:status events
+	afNotified bool
+	afLast     AutoFetchEvent
 }
 
 // Open opens the repository containing dir and starts loading its graph (and,

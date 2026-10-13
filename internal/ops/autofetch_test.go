@@ -90,3 +90,18 @@ func TestBackgroundFetchArgsSSH(t *testing.T) {
 		t.Fatalf("GIT_SSH overridden: %q", args)
 	}
 }
+
+// A background fetch leaves no trace when nothing changed: no FETCH_HEAD
+// write and no auto-maintenance.
+func TestBackgroundFetchQuietFlags(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	args, err := backgroundFetchArgs(bg, repo.R, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"--no-write-fetch-head", "--no-auto-maintenance"} {
+		if !slices.Contains(args, f) {
+			t.Errorf("missing %s in %q", f, args)
+		}
+	}
+}

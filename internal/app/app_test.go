@@ -867,7 +867,7 @@ func TestOpenRepoStoreFailureClosesSession(t *testing.T) {
 }
 
 func TestSettingsBindingsApplyAutoFetch(t *testing.T) {
-	a, _, repo := newTestApp(t)
+	a, ev, repo := newTestApp(t)
 	repo.CommitAll("one")
 	set, err := a.GetSettings()
 	if err != nil || !set.AutoFetch || set.AutoFetchSeconds != 60 {
@@ -877,9 +877,15 @@ func TestSettingsBindingsApplyAutoFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Enabled, but waiting for a first manual remote operation.
 	st, err := a.AutoFetchStatus(ti.ID)
-	if err != nil || !st.Enabled || st.IntervalSeconds != 60 || st.Paused {
+	if err != nil || !st.Enabled || st.IntervalSeconds != 60 || !st.Paused || st.Reason != session.PauseWaitingManual {
 		t.Fatalf("status = %+v %v", st, err)
+	}
+	// The state is pushed to the frontend as autofetch:status.
+	if d, ok := ev.find(session.EventAutoFetchStatus); !ok ||
+		d != (session.AutoFetchEvent{Tab: ti.ID, Enabled: true, Paused: true, Reason: session.PauseWaitingManual}) {
+		t.Fatalf("autofetch:status = %+v %v", d, ok)
 	}
 	set, err = a.SetSettings(store.Settings{AutoFetch: true, AutoFetchSeconds: 10})
 	if err != nil || set.AutoFetchSeconds != store.MinAutoFetchSeconds {
