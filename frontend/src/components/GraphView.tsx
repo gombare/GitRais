@@ -8,6 +8,8 @@ import { drawGraph } from '../graph/draw';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
 import { commitMenu, stashMenu } from '../actions/repoActions';
 import { graphWidth, GRAPH_PAD, LANE_W, ROW_H, visibleRange } from '../graph/geometry';
+import { fullDate, relativeDate } from '../format/date';
+import { useNow } from '../hooks/useNow';
 import type { app, gitread } from '../../wailsjs/go/models';
 
 const PAGE = 500;
@@ -22,8 +24,6 @@ function refsByHash(refs?: gitread.Refs): Map<string, gitread.Ref[]> {
   for (const r of refs?.refs ?? []) m.set(r.hash, [...(m.get(r.hash) ?? []), r]);
   return m;
 }
-
-const fmtDate = (t: number) => new Date(t * 1000).toLocaleString();
 
 // Stash rows get the same actions as the left panel's stash list; commits get checkout/branch/tag/copy.
 const rowMenu = (tab: string, r: app.RowDTO): MenuItem[] => r.kind === 'stash'
@@ -40,6 +40,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
   const select = useRepo((s) => s.select);
   const selected = selection?.kind === 'commit' ? selection.hash : null;
   const labels = useMemo(() => refsByHash(refs), [refs]);
+  const now = useNow();
 
   const scroller = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -252,7 +253,7 @@ export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<Gra
                     </span>
                     <span className="graph-subject">{r.subject}</span>
                     <span className="graph-author muted">{r.author}</span>
-                    <span className="graph-date muted">{fmtDate(r.time)}</span>
+                    <span className="graph-date muted" title={fullDate(r.time)}>{relativeDate(r.time, now)}</span>
                   </>
                 ) : <span className="muted">…</span>}
               </div>
