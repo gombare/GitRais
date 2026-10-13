@@ -25,14 +25,6 @@ func main() {
 	debug.SetMemoryLimit(400 << 20)
 
 	a := app.New()
-	// The Edit menu is required for copy/paste inside the WebView. Repository
-	// commands live in the toolbar and in keyboard shortcuts handled by the
-	// frontend, so menu and shortcuts cannot disagree.
-	appMenu := menu.NewMenu()
-	appMenu.Append(menu.AppMenu())
-	appMenu.Append(menu.EditMenu())
-	help := appMenu.AddSubmenu("Aiuto")
-	help.AddText("Activity log", nil, func(*menu.CallbackData) { _ = a.OpenActivityLog() })
 
 	err := wails.Run(&options.App{
 		Title:       "Gitrais",
@@ -43,10 +35,22 @@ func main() {
 		AssetServer: &assetserver.Options{Assets: assets},
 		OnStartup:   func(ctx context.Context) { app.Startup(a, ctx) },
 		OnShutdown:  func(ctx context.Context) { app.Shutdown(a, ctx) },
-		Menu:        appMenu,
+		Menu:        appMenu(func() { _ = a.OpenActivityLog() }),
 		Bind:        []interface{}{a},
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// appMenu builds the native menu bar. The Edit menu is required for copy/paste
+// inside the WebView. Repository commands live in the toolbar and in keyboard
+// shortcuts handled by the frontend, so menu and shortcuts cannot disagree.
+func appMenu(openActivityLog func()) *menu.Menu {
+	m := menu.NewMenu()
+	m.Append(menu.AppMenu())
+	m.Append(menu.EditMenu())
+	help := m.AddSubmenu("Aiuto")
+	help.AddText("Log attività", nil, func(*menu.CallbackData) { openActivityLog() })
+	return m
 }
