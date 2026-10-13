@@ -28,6 +28,19 @@ type Layout struct {
 	RightWidth int `json:"rightWidth"`
 }
 
+// Settings are the user preferences.
+type Settings struct {
+	// AutoFetch enables the periodic background fetch of every open repository.
+	AutoFetch bool `json:"autoFetch"`
+	// AutoFetchSeconds is its interval, at least MinAutoFetchSeconds.
+	AutoFetchSeconds int `json:"autoFetchSeconds"`
+}
+
+const (
+	DefaultAutoFetchSeconds = 60
+	MinAutoFetchSeconds     = 30
+)
+
 type State struct {
 	Tabs      []Tab            `json:"tabs"`
 	ActiveTab string           `json:"activeTab"`
@@ -35,6 +48,7 @@ type State struct {
 	Favorites []string         `json:"favorites"`
 	Drafts    map[string]Draft `json:"drafts"`
 	Layout    Layout           `json:"layout"`
+	Settings  Settings         `json:"settings"`
 }
 
 const MaxRecents = 20
@@ -69,11 +83,15 @@ func Open(path string) *Store { return &Store{path: path} }
 
 func defaults() State {
 	return State{Tabs: []Tab{}, Recents: []string{}, Favorites: []string{}, Drafts: map[string]Draft{},
-		Layout: Layout{LeftWidth: 260, RightWidth: 380}}
+		Layout:   Layout{LeftWidth: 260, RightWidth: 380},
+		Settings: Settings{AutoFetch: true, AutoFetchSeconds: DefaultAutoFetchSeconds}}
 }
 
-// normalize replaces nil collections so the JSON never contains null.
+// normalize replaces nil collections so the JSON never contains null, and
+// brings the settings into their valid range. Fields missing from an older
+// state file keep the defaults() values json.Unmarshal started from.
 func normalize(st *State) {
+	st.Settings = NormalizeSettings(st.Settings)
 	if st.Tabs == nil {
 		st.Tabs = []Tab{}
 	}
@@ -182,6 +200,18 @@ func writeAtomic(path string, data []byte) error {
 		d.Close()
 	}
 	return nil
+}
+
+// NormalizeSettings brings s into the valid range: a zero interval becomes the
+// default, a shorter one than MinAutoFetchSeconds the minimum.
+func NormalizeSettings(s Settings) Settings {
+	switch {
+	case s.AutoFetchSeconds <= 0:
+		s.AutoFetchSeconds = DefaultAutoFetchSeconds
+	case s.AutoFetchSeconds < MinAutoFetchSeconds:
+		s.AutoFetchSeconds = MinAutoFetchSeconds
+	}
+	return s
 }
 
 // AddRecent moves path to the front of Recents, dropping duplicates and

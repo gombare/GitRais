@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   Fetch: vi.fn(async (..._a: unknown[]) => undefined), Pull: vi.fn(async (..._a: unknown[]) => undefined),
   Push: vi.fn(async (..._a: unknown[]) => undefined), CancelOp: vi.fn(async (..._a: unknown[]) => undefined),
   CreateBranch: vi.fn(async (..._a: unknown[]) => undefined), StashPush: vi.fn(async (..._a: unknown[]) => undefined),
-  StashPop: vi.fn(async (..._a: unknown[]) => undefined),
+  StashPop: vi.fn(async (..._a: unknown[]) => undefined), AutoFetchStatus: vi.fn(async (..._a: unknown[]) => undefined),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 

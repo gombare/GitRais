@@ -88,7 +88,9 @@ const watchDebounce = 300 * time.Millisecond
 //     watcher events; the session emits wip:changed (and refs:changed plus a graph
 //     reload when refs may have moved) itself once the write is over, also on error;
 //   - at most one remote operation runs at a time (ErrOpInProgress otherwise); it
-//     is cancellable with CancelOp, also while waiting for the write lock.
+//     is cancellable with CancelOp, also while waiting for the write lock;
+//   - the periodic auto-fetch never blocks any of the above: every write cancels
+//     it (see autofetch.go).
 type Session struct {
 	ID, Dir, GitDir string
 	commonDir       string
@@ -123,6 +125,17 @@ type Session struct {
 	opCancel context.CancelFunc // non-nil while a remote operation runs
 
 	watchers []*watch.Watcher
+
+	// Auto-fetch (see autofetch.go), guarded by afMu.
+	afMu       sync.Mutex
+	afInterval time.Duration // 0 = disabled
+	afKick     chan struct{} // capacity 1: the interval changed
+	afWriters  int           // writes (local and remote) in progress or queued
+	afCancel   context.CancelFunc
+	afDone     chan struct{} // closed when the running auto-fetch has stopped
+	afPaused   bool
+	afReason   string
+	afWG       sync.WaitGroup // the auto-fetch loop
 }
 
 // Open opens the repository containing dir and starts loading its graph (and,
@@ -132,13 +145,15 @@ func Open(id, dir string, r *gitexec.Runner, emit Emitter) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	wctx, wcancel := context.WithCancel(context.Background())
 	s := &Session{ID: id, r: r, emitFn: emit, ctx: ctx, cancel: cancel, writeCtx: wctx, writeCancel: wcancel,
-		writeSem: make(chan struct{}, 1)}
+		writeSem: make(chan struct{}, 1), afKick: make(chan struct{}, 1), afInterval: defaultAutoFetchInterval}
 	if err := s.open(dir); err != nil {
 		s.Close()
 		return nil, err
 	}
 	s.Reload()
 	s.startCommitGraph()
+	s.afWG.Add(1)
+	go s.autoFetchLoop()
 	return s, nil
 }
 
@@ -198,9 +213,9 @@ func revParse(ctx context.Context, r *gitexec.Runner, dir string, flags ...strin
 	return filepath.EvalSymlinks(strings.TrimSpace(string(out)))
 }
 
-// Close stops the watchers and cancels the graph load, the commit-graph
-// write, the remote operation and the writes still waiting for the write lock
-// at once. A local write
+// Close stops the watchers and the auto-fetch and cancels the graph load, the
+// commit-graph write, the remote operation and the writes still waiting for
+// the write lock at once. A local write
 // already running is given closeGrace to finish (killing git half-way through
 // a checkout or a commit hook is worse than waiting), then cancelled. Close
 // waits for all of them. Nothing is emitted once Close has started, and no
@@ -240,6 +255,7 @@ func (s *Session) Close() {
 		s.writeCancel()
 		<-writesDone
 		s.loadWG.Wait()
+		s.afWG.Wait()
 	})
 }
 
@@ -473,6 +489,9 @@ func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context)
 	s.writeWG.Add(1)
 	s.loadMu.Unlock()
 	defer s.writeWG.Done()
+	// A write always wins over the background auto-fetch.
+	s.beginWrite()
+	defer s.endWrite()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

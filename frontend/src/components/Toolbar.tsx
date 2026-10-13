@@ -3,6 +3,7 @@ import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
 import { askTextCheck, confirmAction } from './Dialogs';
 import { openMenu } from './ContextMenu';
+import { AutoFetchSettings } from './AutoFetchSettings';
 import { createBranchAt, localWrite, pull, PULL_MODES } from '../actions/repoActions';
 
 // Actions that are currently running, keyed by tab and name: a double click
@@ -93,6 +94,7 @@ export function Toolbar({ tab }: { tab: string }) {
       <button onClick={a.stash}>Stash</button>
       <button disabled={stashes === 0} aria-label="Pop stash" onClick={a.pop}>Pop</button>
       <span className="tb-flex" />
+      <AutoFetchSettings tab={tab} />
       <span className="muted">{head ? (head.detached ? `HEAD staccata ${head.hash.slice(0, 7)}` : head.branch) : ''}</span>
       {/* Always mounted so screen readers announce changes; a remote op shows its own progress instead. */}
       <span className="tb-busy" aria-live="polite">{writing && !op ? 'Operazione in corso…' : ''}</span>

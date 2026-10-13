@@ -254,9 +254,14 @@ func (s *Session) StashDrop(ctx context.Context, hash string) error {
 }
 
 // Fetch fetches all remotes. Remote operation: exclusive (ErrOpInProgress),
-// cancellable with CancelOp, progress as op:progress.
+// cancellable with CancelOp, progress as op:progress. Success resumes a paused
+// auto-fetch.
 func (s *Session) Fetch() error {
-	return s.remote(context.Background(), "fetch", func(c context.Context, p ops.OnProgress) error { return ops.Fetch(c, s.r, s.Dir, p) })
+	err := s.remote(context.Background(), "fetch", func(c context.Context, p ops.OnProgress) error { return ops.Fetch(c, s.r, s.Dir, p) })
+	if err == nil {
+		s.resumeAutoFetch()
+	}
+	return err
 }
 
 // Pull pulls the current branch; ops.ErrPullStrategyRequired asks the user to

@@ -47,6 +47,65 @@ func Fetch(ctx context.Context, r *gitexec.Runner, dir string, p OnProgress) err
 	return err
 }
 
+// nonInteractiveEnv disables every credential prompt for a background fetch:
+// empty GIT_ASKPASS/SSH_ASKPASS (an empty GIT_ASKPASS also overrides
+// core.askPass), SSH_ASKPASS_REQUIRE=never, no terminal prompt, and Git
+// Credential Manager in non-interactive mode. Stored credentials (credential
+// helpers, ssh-agent, unencrypted keys) still work.
+var nonInteractiveEnv = []string{
+	"GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "SSH_ASKPASS_REQUIRE=never", "GCM_INTERACTIVE=never",
+}
+
+// backgroundSSHCommand makes ssh fail instead of asking for a passphrase, a
+// password or a host key confirmation (git runs in its own process group, so
+// from a terminal an ssh prompt on /dev/tty would stop it forever).
+const backgroundSSHCommand = "ssh -o BatchMode=yes"
+
+// backgroundFetchArgs returns the arguments of a background fetch. BatchMode is
+// forced through `-c core.sshCommand` only when the user has no ssh command of
+// their own: GIT_SSH_COMMAND would override it anyway, and core.sshCommand
+// would override GIT_SSH and a configured core.sshCommand, which must be kept.
+func backgroundFetchArgs(ctx context.Context, r *gitexec.Runner, dir string) ([]string, error) {
+	args := []string{"fetch", "--all", "--prune", "--quiet"}
+	if envSet(r, "GIT_SSH_COMMAND") || envSet(r, "GIT_SSH") {
+		return args, nil
+	}
+	_, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"config", "--get", "core.sshCommand"}, Env: gitexec.ReadOnlyEnv})
+	switch {
+	case err == nil:
+		return args, nil
+	case gitexec.ExitCode(err) == 1: // unset
+		return append([]string{"-c", "core.sshCommand=" + backgroundSSHCommand}, args...), nil
+	default:
+		return nil, err
+	}
+}
+
+// envSet reports whether git would see key with a non-empty value (the
+// runner's environment overrides the inherited one).
+func envSet(r *gitexec.Runner, key string) bool {
+	v, found := os.LookupEnv(key)
+	for _, kv := range r.Env {
+		if k, val, ok := strings.Cut(kv, "="); ok && k == key {
+			v, found = val, true
+		}
+	}
+	return found && v != ""
+}
+
+// FetchBackground is Fetch for the periodic auto-fetch: quiet (no progress)
+// and never interactive (see nonInteractiveEnv and backgroundFetchArgs), so a
+// remote that needs credentials fails with KindAuthFailed (or KindNetwork for
+// ssh) instead of prompting.
+func FetchBackground(ctx context.Context, r *gitexec.Runner, dir string) error {
+	args, err := backgroundFetchArgs(ctx, r, dir)
+	if err != nil {
+		return err
+	}
+	_, err = r.Run(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: nonInteractiveEnv})
+	return err
+}
+
 // PullMode selects how Pull reconciles the local branch with its upstream.
 type PullMode string
 

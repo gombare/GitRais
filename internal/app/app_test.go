@@ -853,3 +853,49 @@ func TestOpenRepoStoreFailureClosesSession(t *testing.T) {
 		t.Fatalf("%d session(s) left open after the failed OpenRepo", n)
 	}
 }
+
+func TestSettingsBindingsApplyAutoFetch(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("one")
+	set, err := a.GetSettings()
+	if err != nil || !set.AutoFetch || set.AutoFetchSeconds != 60 {
+		t.Fatalf("defaults = %+v %v", set, err)
+	}
+	ti, err := a.OpenRepo(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := a.AutoFetchStatus(ti.ID)
+	if err != nil || !st.Enabled || st.IntervalSeconds != 60 || st.Paused {
+		t.Fatalf("status = %+v %v", st, err)
+	}
+	set, err = a.SetSettings(store.Settings{AutoFetch: true, AutoFetchSeconds: 10})
+	if err != nil || set.AutoFetchSeconds != store.MinAutoFetchSeconds {
+		t.Fatalf("clamped = %+v %v", set, err)
+	}
+	if st, _ = a.AutoFetchStatus(ti.ID); st.IntervalSeconds != store.MinAutoFetchSeconds {
+		t.Fatalf("not applied: %+v", st)
+	}
+	if _, err = a.SetSettings(store.Settings{AutoFetch: false, AutoFetchSeconds: 120}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = a.AutoFetchStatus(ti.ID); st.Enabled {
+		t.Fatalf("not disabled: %+v", st)
+	}
+	if set, _ = a.GetSettings(); set.AutoFetch || set.AutoFetchSeconds != 120 {
+		t.Fatalf("not persisted: %+v", set)
+	}
+	// A tab opened later starts with the saved settings.
+	other := testutil.NewRepoWith(t, repo.R)
+	other.CommitAll("x")
+	ti2, err := a.OpenRepo(other.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = a.AutoFetchStatus(ti2.ID); st.Enabled {
+		t.Fatalf("new tab ignores settings: %+v", st)
+	}
+	if _, err := a.AutoFetchStatus("nope"); decodeUIError(t, err).Kind != "NoTab" {
+		t.Fatal("unknown tab must be NoTab")
+	}
+}

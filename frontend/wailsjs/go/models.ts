@@ -453,6 +453,24 @@ export namespace ops {
 
 export namespace session {
 	
+	export class AutoFetchStatus {
+	    enabled: boolean;
+	    intervalSeconds: number;
+	    paused: boolean;
+	    reason: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AutoFetchStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.intervalSeconds = source["intervalSeconds"];
+	        this.paused = source["paused"];
+	        this.reason = source["reason"];
+	    }
+	}
 	export class FingerprintLine {
 	    kind: string;
 	    text: string;
@@ -645,6 +663,20 @@ export namespace store {
 	        this.rightWidth = source["rightWidth"];
 	    }
 	}
+	export class Settings {
+	    autoFetch: boolean;
+	    autoFetchSeconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.autoFetch = source["autoFetch"];
+	        this.autoFetchSeconds = source["autoFetchSeconds"];
+	    }
+	}
 	export class Tab {
 	    id: string;
 	    path: string;
@@ -666,6 +698,7 @@ export namespace store {
 	    favorites: string[];
 	    drafts: Record<string, Draft>;
 	    layout: Layout;
+	    settings: Settings;
 	
 	    static createFrom(source: any = {}) {
 	        return new State(source);
@@ -679,6 +712,7 @@ export namespace store {
 	        this.favorites = source["favorites"];
 	        this.drafts = this.convertValues(source["drafts"], Draft, true);
 	        this.layout = this.convertValues(source["layout"], Layout);
+	        this.settings = this.convertValues(source["settings"], Settings);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

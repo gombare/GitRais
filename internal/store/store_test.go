@@ -168,3 +168,35 @@ func TestDefaultPathEnvOverride(t *testing.T) {
 		t.Fatalf("got %q", p)
 	}
 }
+
+func TestSettingsDefaultsAndClamp(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
+	st, err := Open(p).Load()
+	if err != nil || !st.Settings.AutoFetch || st.Settings.AutoFetchSeconds != 60 {
+		t.Fatalf("defaults = %+v %v", st.Settings, err)
+	}
+	// A state file written before settings existed gets the defaults.
+	if err := os.WriteFile(p, []byte(`{"tabs":[],"activeTab":""}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = Open(p).Load(); !st.Settings.AutoFetch || st.Settings.AutoFetchSeconds != 60 {
+		t.Fatalf("old file = %+v", st.Settings)
+	}
+	// Missing fields keep their default; too short intervals are raised to the minimum.
+	if err := os.WriteFile(p, []byte(`{"settings":{"autoFetch":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = Open(p).Load(); st.Settings.AutoFetch || st.Settings.AutoFetchSeconds != 60 {
+		t.Fatalf("partial = %+v", st.Settings)
+	}
+	if err := os.WriteFile(p, []byte(`{"settings":{"autoFetch":true,"autoFetchSeconds":5}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ = Open(p).Load(); st.Settings.AutoFetchSeconds != MinAutoFetchSeconds {
+		t.Fatalf("clamp = %+v", st.Settings)
+	}
+	st, err = Open(p).Update(func(st *State) { st.Settings = Settings{AutoFetch: true, AutoFetchSeconds: 1} })
+	if err != nil || st.Settings.AutoFetchSeconds != MinAutoFetchSeconds {
+		t.Fatalf("update clamp = %+v %v", st.Settings, err)
+	}
+}

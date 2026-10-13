@@ -926,6 +926,7 @@ func TestOpenRepoWithExtensions(t *testing.T) {
 // the graph, which would add events to tests that count them.
 func TestMain(m *testing.M) {
 	autoCommitGraph = false
+	defaultAutoFetchInterval = 0 // tests enable it explicitly
 	os.Exit(m.Run())
 }
 

@@ -6,6 +6,10 @@ export function AnswerAuth(arg1, arg2, arg3) {
   return window['go']['app']['App']['AnswerAuth'](arg1, arg2, arg3);
 }
 
+export function AutoFetchStatus(arg1) {
+  return window['go']['app']['App']['AutoFetchStatus'](arg1);
+}
+
 export function CancelClone() {
   return window['go']['app']['App']['CancelClone']();
 }
@@ -72,6 +76,10 @@ export function FileVersions(arg1, arg2) {
 
 export function FindRow(arg1, arg2) {
   return window['go']['app']['App']['FindRow'](arg1, arg2);
+}
+
+export function GetSettings() {
+  return window['go']['app']['App']['GetSettings']();
 }
 
 export function GetState() {
@@ -148,6 +156,10 @@ export function SaveLayout(arg1) {
 
 export function SetActiveTab(arg1) {
   return window['go']['app']['App']['SetActiveTab'](arg1);
+}
+
+export function SetSettings(arg1) {
+  return window['go']['app']['App']['SetSettings'](arg1);
 }
 
 export function SetUpstream(arg1, arg2, arg3) {

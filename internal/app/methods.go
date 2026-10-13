@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"gitrais/internal/diff"
 	"gitrais/internal/gitexec"
@@ -57,6 +58,9 @@ func (a *App) openSession(id, path string) (TabInfo, error) {
 	if err != nil {
 		return TabInfo{}, err
 	}
+	// The saved settings; on a read error the defaults Load returns.
+	st, _ := a.store.Load()
+	s.SetAutoFetch(autoFetchInterval(st.Settings))
 	e.s = s
 	a.mu.Lock()
 	if a.closed {
@@ -229,6 +233,42 @@ func (a *App) SaveDraft(path string, d store.Draft) error {
 func (a *App) SaveLayout(l store.Layout) error {
 	_, err := a.store.Update(func(st *store.State) { st.Layout = l })
 	return uiErr(err)
+}
+
+// GetSettings returns the user preferences.
+func (a *App) GetSettings() (store.Settings, error) {
+	st, err := a.store.Load()
+	return st.Settings, uiErr(err)
+}
+
+// SetSettings saves the user preferences (normalized: the auto-fetch interval
+// is at least store.MinAutoFetchSeconds) and applies them to every open tab.
+func (a *App) SetSettings(set store.Settings) (store.Settings, error) {
+	st, err := a.store.Update(func(st *store.State) { st.Settings = store.NormalizeSettings(set) })
+	if err != nil {
+		return store.Settings{}, uiErr(err)
+	}
+	a.mu.Lock()
+	for _, e := range a.sessions {
+		e.s.SetAutoFetch(autoFetchInterval(st.Settings))
+	}
+	a.mu.Unlock()
+	return st.Settings, nil
+}
+
+// AutoFetchStatus reports whether the tab's periodic fetch is enabled and
+// whether it is paused after an authentication or network failure (until the
+// next successful manual Fetch).
+func (a *App) AutoFetchStatus(tab string) (session.AutoFetchStatus, error) {
+	return with(a, tab, func(s *session.Session) (session.AutoFetchStatus, error) { return s.AutoFetchStatus(), nil })
+}
+
+// autoFetchInterval converts the settings into a session interval (0 = off).
+func autoFetchInterval(set store.Settings) time.Duration {
+	if !set.AutoFetch {
+		return 0
+	}
+	return time.Duration(store.NormalizeSettings(set).AutoFetchSeconds) * time.Second
 }
 
 // with runs fn on the tab's session, converting the error for the frontend.
