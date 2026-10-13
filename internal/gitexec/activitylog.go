@@ -19,9 +19,19 @@ type ActivityLog struct {
 
 func NewActivityLog(w io.Writer) *ActivityLog { return &ActivityLog{w: w} }
 
+// maxLogSize is the size above which OpenActivityLog rotates the log.
+const maxLogSize = 5 << 20
+
+// OpenActivityLog opens the log at path for appending. A log larger than
+// maxLogSize is first renamed to <path>.1, replacing the previous one, so at
+// most two files are kept.
 func OpenActivityLog(path string) (*ActivityLog, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
+	}
+	if st, err := os.Stat(path); err == nil && st.Size() > maxLogSize {
+		// A failed rotation only means the log keeps growing.
+		_ = os.Rename(path, path+".1")
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {

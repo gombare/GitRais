@@ -3,6 +3,9 @@ package gitexec
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,5 +52,45 @@ func TestRedactURL(t *testing.T) {
 		if got := RedactURL(c.in); got != c.want {
 			t.Errorf("RedactURL(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// A log larger than maxLogSize at open is rotated to <path>.1 (replacing an
+// older one); a smaller one is appended to.
+func TestOpenActivityLogRotates(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "activity.log")
+	big := bytes.Repeat([]byte("x"), 5<<20+1)
+	if err := os.WriteFile(p, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p+".1", []byte("older"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := OpenActivityLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Record("/r", []string{"status"}, 0, 0)
+	l.Close()
+	if st, err := os.Stat(p + ".1"); err != nil || st.Size() != int64(len(big)) {
+		t.Fatalf("rotated log: %v %v", st, err)
+	}
+	if b, _ := os.ReadFile(p); len(b) == 0 || len(b) > 1000 {
+		t.Fatalf("new log size = %d", len(b))
+	}
+	if _, err := os.Stat(p + ".2"); err == nil {
+		t.Fatal("only one rotated log must be kept")
+	}
+
+	// Small: appended, not rotated.
+	l, _ = OpenActivityLog(p)
+	l.Record("/r", []string{"log"}, 0, 0)
+	l.Close()
+	if b, _ := os.ReadFile(p); strings.Count(string(b), "\n") != 2 {
+		t.Fatalf("log = %q", b)
+	}
+	if st, _ := os.Stat(p + ".1"); st.Size() != int64(len(big)) {
+		t.Fatal("small log rotated")
 	}
 }
