@@ -2,11 +2,17 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"gitrais/internal/gitexec"
 )
+
+// ErrSwitchedNotUpdated is returned by Checkout of a remote branch when the
+// switch to the existing local branch succeeded but its fast-forward failed
+// (e.g. a file in the way). It wraps the git error.
+var ErrSwitchedNotUpdated = errors.New("switched to the branch, but it could not be fast-forwarded")
 
 // run executes a mutating git command and discards its stdout.
 func run(ctx context.Context, r *gitexec.Runner, dir string, args ...string) error {
@@ -128,7 +134,8 @@ type CheckoutTarget struct {
 // fast-forwarded with `merge --ff-only`; a branch that is equal, ahead or
 // diverged is left where it is. The local branch is never reset, so no commit
 // is ever dropped. If the fast-forward fails (e.g. local changes in the way)
-// the switch has still happened and the error is returned.
+// the switch has still happened and ErrSwitchedNotUpdated (wrapping the git
+// error) is returned.
 func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarget) error {
 	switch t.Kind {
 	case "local":
@@ -161,8 +168,10 @@ func Checkout(ctx context.Context, r *gitexec.Runner, dir string, t CheckoutTarg
 			if !behind {
 				return nil
 			}
-			_, err = r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"merge", "--ff-only", "--no-edit", "--end-of-options", "refs/remotes/" + t.Name}, Env: noEditorEnv})
-			return err
+			if _, err = r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"merge", "--ff-only", "--no-edit", "--end-of-options", "refs/remotes/" + t.Name}, Env: noEditorEnv}); err != nil {
+				return fmt.Errorf("%w: %w", ErrSwitchedNotUpdated, err)
+			}
+			return nil
 		}
 		if gitexec.ExitCode(err) != 1 {
 			return err

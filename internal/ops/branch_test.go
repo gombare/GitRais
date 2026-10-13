@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -294,6 +295,29 @@ func TestCheckoutRemoteFastForwardsBehindLocal(t *testing.T) {
 	}
 	if _, err := os.Stat(b.Path("t.txt")); err != nil {
 		t.Fatalf("working tree not updated: %v", err)
+	}
+}
+
+// The switch happened but the fast-forward failed: ErrSwitchedNotUpdated,
+// still carrying the git error.
+func TestCheckoutRemoteSwitchedNotUpdated(t *testing.T) {
+	a, b := remoteTopicClone(t)
+	a.Git("switch", "-q", "-c", "topic", "origin/topic")
+	a.Write("t.txt", "remote\n")
+	a.CommitAll("remote topic work")
+	a.Git("push", "-q", "origin", "topic")
+	b.Git("fetch", "-q", "origin")
+	b.Write("t.txt", "untracked in the way\n")
+	err := Checkout(bg, b.R, b.Dir, CheckoutTarget{Kind: "remote", Name: "origin/topic"})
+	if !errors.Is(err, ErrSwitchedNotUpdated) {
+		t.Fatalf("want ErrSwitchedNotUpdated, got %v", err)
+	}
+	var ge *gitexec.GitError
+	if !errors.As(err, &ge) || ge.Stderr == "" {
+		t.Fatalf("git error not preserved: %v", err)
+	}
+	if b.Git("branch", "--show-current") != "topic" {
+		t.Fatal("the switch should have happened")
 	}
 }
 

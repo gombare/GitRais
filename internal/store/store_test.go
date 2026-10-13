@@ -200,3 +200,16 @@ func TestSettingsDefaultsAndClamp(t *testing.T) {
 		t.Fatalf("update clamp = %+v %v", st.Settings, err)
 	}
 }
+
+func TestNormalizeSettingsBounds(t *testing.T) {
+	cases := map[int]int{0: DefaultAutoFetchSeconds, -5: DefaultAutoFetchSeconds, 1: MinAutoFetchSeconds,
+		30: 30, 600: 600, 3600: 3600, 3601: MaxAutoFetchSeconds, 1 << 62: MaxAutoFetchSeconds}
+	for in, want := range cases {
+		if got := NormalizeSettings(Settings{AutoFetch: true, AutoFetchSeconds: in}).AutoFetchSeconds; got != want {
+			t.Errorf("NormalizeSettings(%d) = %d, want %d", in, got, want)
+		}
+	}
+	if MaxAutoFetchSeconds != 3600 {
+		t.Fatalf("MaxAutoFetchSeconds = %d", MaxAutoFetchSeconds)
+	}
+}

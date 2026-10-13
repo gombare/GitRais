@@ -32,13 +32,14 @@ type Layout struct {
 type Settings struct {
 	// AutoFetch enables the periodic background fetch of every open repository.
 	AutoFetch bool `json:"autoFetch"`
-	// AutoFetchSeconds is its interval, at least MinAutoFetchSeconds.
+	// AutoFetchSeconds is its interval, in [MinAutoFetchSeconds, MaxAutoFetchSeconds].
 	AutoFetchSeconds int `json:"autoFetchSeconds"`
 }
 
 const (
 	DefaultAutoFetchSeconds = 60
 	MinAutoFetchSeconds     = 30
+	MaxAutoFetchSeconds     = 3600
 )
 
 type State struct {
@@ -202,14 +203,18 @@ func writeAtomic(path string, data []byte) error {
 	return nil
 }
 
-// NormalizeSettings brings s into the valid range: a zero interval becomes the
-// default, a shorter one than MinAutoFetchSeconds the minimum.
+// NormalizeSettings brings s into the valid range: a zero (or negative)
+// interval becomes the default, others are clamped to
+// [MinAutoFetchSeconds, MaxAutoFetchSeconds] (which also keeps the conversion
+// to a time.Duration from overflowing).
 func NormalizeSettings(s Settings) Settings {
 	switch {
 	case s.AutoFetchSeconds <= 0:
 		s.AutoFetchSeconds = DefaultAutoFetchSeconds
 	case s.AutoFetchSeconds < MinAutoFetchSeconds:
 		s.AutoFetchSeconds = MinAutoFetchSeconds
+	case s.AutoFetchSeconds > MaxAutoFetchSeconds:
+		s.AutoFetchSeconds = MaxAutoFetchSeconds
 	}
 	return s
 }

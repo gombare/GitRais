@@ -15,10 +15,13 @@ const (
 	KindNonFastForward Kind = "NonFastForward"
 	KindConflict       Kind = "Conflict"
 	KindDirtyWorktree  Kind = "DirtyWorktree"
-	KindLocked         Kind = "Locked"
-	KindNotARepo       Kind = "NotARepo"
-	KindNetwork        Kind = "Network"
-	KindHookRejected   Kind = "HookRejected"
+	// KindUntrackedOverwrite: untracked files are in the way. Unlike
+	// KindDirtyWorktree, stashing (autostash) would not help.
+	KindUntrackedOverwrite Kind = "UntrackedWouldBeOverwritten"
+	KindLocked             Kind = "Locked"
+	KindNotARepo           Kind = "NotARepo"
+	KindNetwork            Kind = "Network"
+	KindHookRejected       Kind = "HookRejected"
 )
 
 type GitError struct {
@@ -98,6 +101,9 @@ var rules = []struct {
 		"The requested URL returned error: 401", "The requested URL returned error: 403"}},
 	{KindNonFastForward, []string{"(fetch first)", "(non-fast-forward)", "Updates were rejected", "(stale info)"}},
 	{KindConflict, []string{"CONFLICT (", "Automatic merge failed", "could not apply"}},
+	// Before DirtyWorktree: its "would be overwritten by" matches these too.
+	{KindUntrackedOverwrite, []string{"untracked working tree files would be overwritten",
+		"untracked working tree files would be removed"}},
 	{KindDirtyWorktree, []string{"would be overwritten by", "Please commit your changes or stash them",
 		"cannot pull with rebase: You have unstaged changes", "cannot pull with rebase: Your index contains uncommitted changes"}},
 	{KindLocked, []string{".lock': File exists", "Unable to create '"}},

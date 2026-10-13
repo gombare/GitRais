@@ -108,3 +108,25 @@ func TestSummarizeSplitsOnCR(t *testing.T) {
 		}
 	}
 }
+
+// Untracked files in the way are not "local changes": autostash cannot help,
+// so they get their own kind, checked before DirtyWorktree.
+func TestClassifyUntrackedOverwrite(t *testing.T) {
+	cases := []struct {
+		stderr string
+		want   Kind
+	}{
+		{"error: The following untracked working tree files would be overwritten by merge:\n\tb.txt\nPlease move or remove them before you merge.\nAborting", KindUntrackedOverwrite},
+		{"error: The following untracked working tree files would be overwritten by checkout:\n\tb.txt", KindUntrackedOverwrite},
+		{"error: The following untracked working tree files would be removed by merge:\n\tb.txt", KindUntrackedOverwrite},
+		{"error: Your local changes to the following files would be overwritten by merge:\n\ta.txt\nPlease commit your changes or stash them before you merge.", KindDirtyWorktree},
+	}
+	for _, c := range cases {
+		if got := Classify(c.stderr); got != c.want {
+			t.Errorf("Classify(%q) = %s, want %s", c.stderr, got, c.want)
+		}
+	}
+	if KindUntrackedOverwrite != "UntrackedWouldBeOverwritten" {
+		t.Fatalf("kind = %s", KindUntrackedOverwrite)
+	}
+}

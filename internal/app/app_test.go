@@ -251,6 +251,7 @@ func TestUIErrorKinds(t *testing.T) {
 		{ops.ErrStashNotFound, "StashNotFound"},
 		{fmt.Errorf("pull: %w", ops.ErrPullStrategyRequired), "PullStrategyRequired"},
 		{ops.ErrAutostashConflict, "AutostashConflict"},
+		{ops.ErrSwitchedNotUpdated, "SwitchedNotUpdated"},
 		{ops.ErrDestNotEmpty, "DestNotEmpty"},
 		{ops.ErrLockInUse, "LockInUse"},
 		{ops.ErrLockTooRecent, "LockTooRecent"},
@@ -288,6 +289,17 @@ func TestUIErrorKinds(t *testing.T) {
 	once := uiErr(session.ErrNoBranch)
 	if twice := uiErr(once); twice.Error() != once.Error() {
 		t.Fatalf("double conversion: %s != %s", twice, once)
+	}
+}
+
+// The switch-but-no-fast-forward sentinel wins over the git kind and keeps
+// git's stderr.
+func TestUIErrorSwitchedNotUpdatedKeepsStderr(t *testing.T) {
+	ge := &gitexec.GitError{Args: []string{"merge"}, ExitCode: 1, Stderr: "error: untracked working tree files would be overwritten by merge",
+		Kind: gitexec.KindUntrackedOverwrite}
+	ue := decodeUIError(t, uiErr(fmt.Errorf("%w: %w", ops.ErrSwitchedNotUpdated, ge)))
+	if ue.Kind != "SwitchedNotUpdated" || !strings.Contains(ue.Stderr, "would be overwritten") {
+		t.Fatalf("got %+v", ue)
 	}
 }
 

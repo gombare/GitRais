@@ -432,6 +432,28 @@ func TestPullDirtyOverlappingFailsWithoutAutostash(t *testing.T) {
 	}
 }
 
+// An untracked file where the pull brings a tracked one is UntrackedOverwrite,
+// not DirtyWorktree (autostash would not help).
+func TestPullUntrackedInTheWay(t *testing.T) {
+	for _, mode := range []PullMode{PullDefault, PullRebase} {
+		dest, r := dirtyBehindClone(t, false)
+		gitIn(t, r, dest, "checkout", "--", "f.txt")
+		bare := gitIn(t, r, dest, "remote", "get-url", "origin")
+		a := testutil.NewRepoWith(t, r)
+		a.Git("pull", "-q", bare, "main")
+		a.Write("new.txt", "remote\n")
+		a.CommitAll("remote adds new.txt")
+		a.Git("push", "-q", bare, "HEAD:main")
+		if err := os.WriteFile(filepath.Join(dest, "new.txt"), []byte("mine\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := Pull(bg, r, dest, mode, nil)
+		if gitexec.KindOf(err) != gitexec.KindUntrackedOverwrite {
+			t.Fatalf("%q: want UntrackedOverwrite, got %v", mode, err)
+		}
+	}
+}
+
 func TestPullAutostashKeepsLocalChanges(t *testing.T) {
 	for _, mode := range []PullMode{PullDefault, PullMerge, PullRebase, PullFFOnly} {
 		t.Run(string(mode), func(t *testing.T) {
