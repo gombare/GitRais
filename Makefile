@@ -1,4 +1,6 @@
 GIT_VERSION := 2.54.0
+# wails is installed by `go install` into GOPATH/bin, which is often not on PATH.
+WAILS ?= $(shell command -v wails 2>/dev/null || echo $(shell go env GOPATH)/bin/wails)
 export GITRAIS_GIT ?= $(CURDIR)/build/git-dist/bin/git
 
 .PHONY: git helper dist-stub test test-short e2e dev build package bench bigrepo
@@ -24,10 +26,10 @@ e2e:
 	./scripts/e2e.sh
 
 dev: helper
-	wails dev
+	$(WAILS) dev
 
 build: helper
-	wails build -platform darwin/arm64 -clean
+	$(WAILS) build -platform darwin/arm64 -clean
 
 # `wails build -clean` wipes build/bin, so the helper is rebuilt (fresh make
 # invocation: phony targets run once per invocation) before packaging.
