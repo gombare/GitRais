@@ -58,15 +58,26 @@ var redirectEnv = []string{
 	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_PREFIX",
 }
 
-// inheritedEnv returns os.Environ() without the redirectEnv variables, so a parent shell or hook
-// cannot make commands operate on a repository other than Cmd.Dir.
+// configEnv lists the variables that inject git configuration (git -c and
+// GIT_CONFIG_COUNT with its GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> pairs).
+var configEnv = []string{"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"}
+
+// inheritedEnv returns os.Environ() without the redirectEnv and configEnv variables, so a parent
+// shell or hook can neither make commands operate on a repository other than Cmd.Dir nor inject
+// configuration (core.fsmonitor, core.sshCommand, ...) into them.
 func inheritedEnv() []string {
 	var out []string
 envLoop:
 	for _, kv := range os.Environ() {
-		for _, k := range redirectEnv {
-			if strings.HasPrefix(kv, k+"=") {
-				continue envLoop
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
+			continue
+		}
+		for _, drop := range [][]string{redirectEnv, configEnv} {
+			for _, d := range drop {
+				if k == d {
+					continue envLoop
+				}
 			}
 		}
 		out = append(out, kv)
