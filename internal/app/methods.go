@@ -418,6 +418,13 @@ func (a *App) Pull(tab string, mode ops.PullMode) error {
 	return do(a, tab, func(s *session.Session) error { return s.Pull(mode) })
 }
 
+// PullAutostash pulls like Pull, stashing local changes before and re-applying
+// them after (opt-in, after Pull failed with DirtyWorktree). AutostashConflict
+// when re-applying conflicts: the changes stay in the stash list.
+func (a *App) PullAutostash(tab string, mode ops.PullMode) error {
+	return do(a, tab, func(s *session.Session) error { return s.PullAutostash(mode) })
+}
+
 func (a *App) Push(tab string, force bool) error {
 	return do(a, tab, func(s *session.Session) error { return s.PushCurrent(force) })
 }

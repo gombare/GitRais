@@ -25,6 +25,7 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   InvalidFilePath: ['Percorso non valido', 'Il percorso del file non è valido o esce dal repository.', null],
   NoTab: ['Tab non trovata', 'La tab non esiste più.', null],
   OpInProgress: ['Operazione in corso', 'Un’altra operazione remota è già in esecuzione.', null],
+  AutostashConflict: ['Conflitti dopo il pull', 'Il pull è riuscito, ma riapplicare le modifiche locali ha prodotto conflitti: risolvili nei file. Le modifiche restano anche nella lista degli stash: eliminalo quando non serve più.', null],
   PullStrategyRequired: ['Strategia di pull richiesta', 'Le branch sono divergenti: scegli merge, rebase o solo fast-forward.', null],
   NothingToCommit: ['Niente da committare', 'Non ci sono modifiche in stage.', null],
   NothingToAmend: ['Niente da modificare', 'Non c’è un commit da emendare.', null],

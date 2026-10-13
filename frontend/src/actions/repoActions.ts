@@ -21,8 +21,9 @@ export function localWrite(tab: string, p: Promise<unknown>): Promise<void> {
 }
 
 // Pull through runOp (progress events). With no mode, a PullStrategyRequired failure asks
-// for merge/rebase/ff-only and retries with the choice. Other failures become toasts.
-// Ignored while another remote op runs on the tab.
+// for merge/rebase/ff-only and retries with the choice. A DirtyWorktree failure (local
+// changes the pull would overwrite) offers an opt-in autostash pull with the same mode:
+// never the default. Other failures become toasts. Ignored while another remote op runs on the tab.
 export async function pull(tab: string, mode = ''): Promise<void> {
   const app = useApp.getState();
   if (app.ops[tab]) {
@@ -32,7 +33,8 @@ export async function pull(tab: string, mode = ''): Promise<void> {
   try {
     await app.runOp(tab, 'pull', () => api.Pull(tab, mode as never));
   } catch (e) {
-    if (mode === '' && parseError(e).kind === 'PullStrategyRequired') {
+    const kind = parseError(e).kind;
+    if (mode === '' && kind === 'PullStrategyRequired') {
       const m = await chooseOption({
         title: 'Come integrare le modifiche?',
         message: 'Le branch locale e remota sono divergenti: scegli la strategia di pull.',
@@ -41,6 +43,29 @@ export async function pull(tab: string, mode = ''): Promise<void> {
       if (m) await pull(tab, m);
       return;
     }
+    if (kind === 'DirtyWorktree') {
+      const c = await chooseOption({
+        title: 'Modifiche locali',
+        message: 'Il pull sovrascriverebbe modifiche locali non committate. Puoi metterle da parte, fare pull e riapplicarle: in caso di conflitti restano nella lista degli stash.',
+        options: [{ value: 'autostash', label: 'Metti da parte le modifiche, fai pull e riapplica' }],
+      });
+      if (c === 'autostash') await pullAutostash(tab, mode);
+      return;
+    }
+    toast(e, tab);
+  }
+}
+
+// Pull with autostash through runOp; failures (AutostashConflict included) become toasts.
+async function pullAutostash(tab: string, mode: string): Promise<void> {
+  const app = useApp.getState();
+  if (app.ops[tab]) {
+    toast(JSON.stringify({ kind: 'OpInProgress', message: '', stderr: '' }), tab);
+    return;
+  }
+  try {
+    await app.runOp(tab, 'pull', () => api.PullAutostash(tab, mode as never));
+  } catch (e) {
     toast(e, tab);
   }
 }

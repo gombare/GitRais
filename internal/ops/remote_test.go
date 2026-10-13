@@ -382,3 +382,94 @@ func TestPushHookRejectedErrorMessageIsMeaningful(t *testing.T) {
 		t.Fatalf("unhelpful message: %q", err.Error())
 	}
 }
+
+// dirtyBehindClone returns a clone whose main is one commit behind its
+// upstream, with f.txt modified (uncommitted) where the incoming commit also
+// changes it. With conflict the two edits touch the same line; otherwise they
+// touch distant lines and re-applying the local change merges cleanly.
+func dirtyBehindClone(t *testing.T, conflict bool) (dest string, r *gitexec.Runner) {
+	t.Helper()
+	a := testutil.NewRepo(t)
+	a.Write("f.txt", "1\n2\n3\n4\n5\n6\n7\n8\n")
+	a.CommitAll("base")
+	bare := testutil.NewBare(t, a.R)
+	a.Git("remote", "add", "origin", bare)
+	a.Git("push", "-q", "-u", "origin", "main")
+	dest = filepath.Join(t.TempDir(), "clone")
+	if err := Clone(bg, a.R, bare, dest, nil); err != nil {
+		t.Fatal(err)
+	}
+	a.Write("f.txt", "remote\n2\n3\n4\n5\n6\n7\n8\n")
+	a.CommitAll("remote change")
+	a.Git("push", "-q")
+	local := "1\n2\n3\n4\n5\n6\n7\nlocal\n"
+	if conflict {
+		local = "local\n2\n3\n4\n5\n6\n7\n8\n"
+	}
+	if err := os.WriteFile(filepath.Join(dest, "f.txt"), []byte(local), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dest, a.R
+}
+
+func stashCount(t *testing.T, r *gitexec.Runner, dir string) int {
+	t.Helper()
+	out := gitIn(t, r, dir, "stash", "list")
+	if out == "" {
+		return 0
+	}
+	return len(strings.Split(out, "\n"))
+}
+
+func TestPullDirtyOverlappingFailsWithoutAutostash(t *testing.T) {
+	// Rebase refuses up front ("cannot pull with rebase: You have unstaged changes").
+	for _, mode := range []PullMode{PullDefault, PullRebase} {
+		dest, r := dirtyBehindClone(t, false)
+		err := Pull(bg, r, dest, mode, nil)
+		if gitexec.KindOf(err) != gitexec.KindDirtyWorktree {
+			t.Fatalf("%q: want DirtyWorktree, got %v", mode, err)
+		}
+	}
+}
+
+func TestPullAutostashKeepsLocalChanges(t *testing.T) {
+	for _, mode := range []PullMode{PullDefault, PullMerge, PullRebase, PullFFOnly} {
+		t.Run(string(mode), func(t *testing.T) {
+			dest, r := dirtyBehindClone(t, false)
+			if err := PullAutostash(bg, r, dest, mode, nil); err != nil {
+				t.Fatal(err)
+			}
+			if gitIn(t, r, dest, "log", "-1", "--format=%s") != "remote change" {
+				t.Fatal("pull did not integrate the remote commit")
+			}
+			b, _ := os.ReadFile(filepath.Join(dest, "f.txt"))
+			if string(b) != "remote\n2\n3\n4\n5\n6\n7\nlocal\n" {
+				t.Fatalf("local change lost: %q", b)
+			}
+			if n := stashCount(t, r, dest); n != 0 {
+				t.Fatalf("autostash left %d stash entries", n)
+			}
+		})
+	}
+}
+
+func TestPullAutostashConflictKeepsStash(t *testing.T) {
+	for _, mode := range []PullMode{PullDefault, PullRebase} {
+		t.Run(string(mode), func(t *testing.T) {
+			dest, r := dirtyBehindClone(t, true)
+			err := PullAutostash(bg, r, dest, mode, nil)
+			if !errors.Is(err, ErrAutostashConflict) {
+				t.Fatalf("want ErrAutostashConflict, got %v", err)
+			}
+			if n := stashCount(t, r, dest); n != 1 {
+				t.Fatalf("the stash must be kept, have %d entries", n)
+			}
+			if gitIn(t, r, dest, "log", "-1", "--format=%s") != "remote change" {
+				t.Fatal("pull did not integrate the remote commit")
+			}
+			if gitIn(t, r, dest, "ls-files", "-u") == "" {
+				t.Fatal("conflict markers expected in the index")
+			}
+		})
+	}
+}

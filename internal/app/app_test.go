@@ -250,6 +250,7 @@ func TestUIErrorKinds(t *testing.T) {
 		{ops.ErrStashUnborn, "StashUnborn"},
 		{ops.ErrStashNotFound, "StashNotFound"},
 		{fmt.Errorf("pull: %w", ops.ErrPullStrategyRequired), "PullStrategyRequired"},
+		{ops.ErrAutostashConflict, "AutostashConflict"},
 		{ops.ErrDestNotEmpty, "DestNotEmpty"},
 		{ops.ErrLockInUse, "LockInUse"},
 		{ops.ErrLockTooRecent, "LockTooRecent"},

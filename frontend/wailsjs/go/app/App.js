@@ -106,6 +106,10 @@ export function Pull(arg1, arg2) {
   return window['go']['app']['App']['Pull'](arg1, arg2);
 }
 
+export function PullAutostash(arg1, arg2) {
+  return window['go']['app']['App']['PullAutostash'](arg1, arg2);
+}
+
 export function Push(arg1, arg2) {
   return window['go']['app']['App']['Push'](arg1, arg2);
 }

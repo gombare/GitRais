@@ -19,6 +19,11 @@ var (
 	// ErrDestNotEmpty is returned by Clone when the destination exists and is
 	// not an empty directory.
 	ErrDestNotEmpty = errors.New("destination exists and is not an empty directory")
+	// ErrAutostashConflict is returned by PullAutostash when the pull itself
+	// succeeded but re-applying the stashed local changes conflicted: git kept
+	// the stash entry (it is never dropped) and left conflict markers in the
+	// working tree.
+	ErrAutostashConflict = errors.New("pulled, but re-applying the local changes conflicted: they are kept in the stash list")
 )
 
 // OnProgress receives progress updates parsed from git's stderr.
@@ -57,8 +62,34 @@ const (
 // pull.rebase configured) it returns ErrPullStrategyRequired. A merge or
 // rebase that stops on conflicts returns an error of KindConflict (decided by
 // unmerged index entries) and deliberately leaves the repository in the
-// in-progress state so the UI can offer continue/abort.
+// in-progress state so the UI can offer continue/abort. Local changes that the
+// pull would overwrite make it fail with KindDirtyWorktree (see PullAutostash).
 func Pull(ctx context.Context, r *gitexec.Runner, dir string, mode PullMode, p OnProgress) error {
+	return pull(ctx, r, dir, mode, false, p)
+}
+
+// PullAutostash is Pull with `--autostash`: local changes are stashed before
+// the integration and re-applied after it. When re-applying conflicts, git
+// keeps the stash entry and leaves conflict markers; PullAutostash then
+// returns ErrAutostashConflict (detected by refs/stash moving, i.e. a stash
+// entry left behind). It never drops a stash.
+func PullAutostash(ctx context.Context, r *gitexec.Runner, dir string, mode PullMode, p OnProgress) error {
+	return pull(ctx, r, dir, mode, true, p)
+}
+
+// stashTop returns the commit refs/stash points to ("" when there is none).
+func stashTop(ctx context.Context, r *gitexec.Runner, dir string) (string, error) {
+	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"rev-parse", "-q", "--verify", "refs/stash"}, Env: gitexec.ReadOnlyEnv})
+	if err != nil {
+		if gitexec.ExitCode(err) == 1 {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func pull(ctx context.Context, r *gitexec.Runner, dir string, mode PullMode, autostash bool, p OnProgress) error {
 	args := []string{"pull", "--progress", "--no-edit"}
 	switch mode {
 	case PullDefault:
@@ -71,8 +102,27 @@ func Pull(ctx context.Context, r *gitexec.Runner, dir string, mode PullMode, p O
 	default:
 		return fmt.Errorf("invalid pull mode: %q", mode)
 	}
+	before := ""
+	if autostash {
+		args = append(args, "--autostash")
+		var err error
+		if before, err = stashTop(ctx, r, dir); err != nil {
+			return err
+		}
+	}
 	_, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: noEditorEnv, OnStderr: withProgress(p)})
 	if err == nil {
+		if autostash {
+			// git exits 0 when only the re-application of the autostash
+			// conflicted: the entry it kept is the only trace.
+			after, serr := stashTop(ctx, r, dir)
+			if serr != nil {
+				return serr
+			}
+			if after != before {
+				return ErrAutostashConflict
+			}
+		}
 		return nil
 	}
 	var ge *gitexec.GitError
@@ -85,6 +135,9 @@ func Pull(ctx context.Context, r *gitexec.Runner, dir string, mode PullMode, p O
 	// Conflict messages may go to stdout, so rely on unmerged index entries.
 	u, uerr := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"ls-files", "-u", "-z"}, Env: gitexec.ReadOnlyEnv})
 	if uerr == nil && len(u) > 0 {
+		if autostash && strings.Contains(ge.Stderr, "Applying autostash resulted in conflicts") {
+			return fmt.Errorf("%w: %w", ErrAutostashConflict, err)
+		}
 		ge.Kind = gitexec.KindConflict
 	}
 	return err

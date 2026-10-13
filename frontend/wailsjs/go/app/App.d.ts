@@ -61,6 +61,8 @@ export function PickDirectory(arg1:string):Promise<string>;
 
 export function Pull(arg1:string,arg2:ops.PullMode):Promise<void>;
 
+export function PullAutostash(arg1:string,arg2:ops.PullMode):Promise<void>;
+
 export function Push(arg1:string,arg2:boolean):Promise<void>;
 
 export function PushTag(arg1:string,arg2:string,arg3:string):Promise<void>;

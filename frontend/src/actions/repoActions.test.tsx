@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({
   Checkout: vi.fn(async (..._a: unknown[]) => undefined), CreateBranch: vi.fn(async (..._a: unknown[]) => undefined),
   CreateTag: vi.fn(async (..._a: unknown[]) => undefined), StashApply: vi.fn(async (..._a: unknown[]) => undefined),
   StashPop: vi.fn(async (..._a: unknown[]) => undefined), StashDrop: vi.fn(async (..._a: unknown[]) => undefined),
-  Pull: vi.fn(async (..._a: unknown[]) => undefined),
+  Pull: vi.fn(async (..._a: unknown[]) => undefined), PullAutostash: vi.fn(async (..._a: unknown[]) => undefined),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
@@ -139,5 +139,44 @@ describe('pull', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Solo fast-forward' })); });
     await p;
     expect(api.Pull.mock.calls).toEqual([['t', ''], ['t', 'ff-only']]);
+  });
+  it('DirtyWorktree offers autostash and pulls through runOp with the same mode', async () => {
+    api.Pull.mockRejectedValueOnce(uiErr('DirtyWorktree'));
+    let release!: () => void;
+    api.PullAutostash.mockImplementationOnce(() => new Promise<undefined>((r) => { release = () => r(undefined); }));
+    render(<DialogHost />);
+    let p!: Promise<void>;
+    act(() => { p = pull('t', 'rebase'); });
+    await screen.findByRole('dialog');
+    expect(api.PullAutostash).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Metti da parte le modifiche, fai pull e riapplica' })); });
+    await waitFor(() => expect(api.PullAutostash).toHaveBeenCalledWith('t', 'rebase'));
+    expect(useApp.getState().ops.t?.op).toBe('pull'); // in flight through runOp
+    release();
+    await p;
+    expect(useApp.getState().ops.t).toBeFalsy();
+    expect(useApp.getState().toasts).toHaveLength(0);
+  });
+  it('DirtyWorktree: cancelling the choice does nothing more', async () => {
+    api.Pull.mockRejectedValueOnce(uiErr('DirtyWorktree'));
+    render(<DialogHost />);
+    let p!: Promise<void>;
+    act(() => { p = pull('t'); });
+    await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Annulla' })); });
+    await p;
+    expect(api.PullAutostash).not.toHaveBeenCalled();
+    expect(useApp.getState().toasts).toHaveLength(0);
+  });
+  it('an autostash conflict becomes a toast', async () => {
+    api.Pull.mockRejectedValueOnce(uiErr('DirtyWorktree'));
+    api.PullAutostash.mockRejectedValueOnce(uiErr('AutostashConflict'));
+    render(<DialogHost />);
+    let p!: Promise<void>;
+    act(() => { p = pull('t'); });
+    await screen.findByRole('dialog');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Metti da parte/ })); });
+    await p;
+    expect(useApp.getState().toasts.map((t) => t.error.kind)).toEqual(['AutostashConflict']);
   });
 });

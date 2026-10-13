@@ -44,6 +44,7 @@ var sentinelKinds = []struct {
 	{ops.ErrStashUnborn, "StashUnborn"},
 	{ops.ErrStashNotFound, "StashNotFound"},
 	{ops.ErrPullStrategyRequired, "PullStrategyRequired"},
+	{ops.ErrAutostashConflict, "AutostashConflict"},
 	{ops.ErrDestNotEmpty, "DestNotEmpty"},
 	{ops.ErrLockInUse, "LockInUse"},
 	{ops.ErrLockTooRecent, "LockTooRecent"},

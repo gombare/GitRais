@@ -265,6 +265,16 @@ func (s *Session) Pull(mode ops.PullMode) error {
 	return s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error { return ops.Pull(c, s.r, s.Dir, mode, p) })
 }
 
+// PullAutostash is Pull with git's --autostash: local changes are stashed and
+// re-applied around the integration. ops.ErrAutostashConflict when the
+// re-application conflicts (the stash entry is kept). Opt-in only: the UI
+// offers it after Pull failed with KindDirtyWorktree.
+func (s *Session) PullAutostash(mode ops.PullMode) error {
+	return s.remote(context.Background(), "pull", func(c context.Context, p ops.OnProgress) error {
+		return ops.PullAutostash(c, s.r, s.Dir, mode, p)
+	})
+}
+
 // PushCurrent pushes the current branch to its upstream or, when it has none,
 // to origin (or the first remote), setting the upstream.
 func (s *Session) PushCurrent(force bool) error {

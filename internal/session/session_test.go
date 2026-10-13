@@ -1035,3 +1035,34 @@ func TestRefChangeDuringWipWriteNotLost(t *testing.T) {
 	}
 	rec.waitFor(t, "graph:progress", graphDone(2))
 }
+
+// PullAutostash goes through the remote path: local changes the incoming
+// commit also touches survive, and refs:changed follows.
+func TestPullAutostash(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("f.txt", "1\n2\n3\n4\n5\n6\n")
+	repo.CommitAll("one")
+	bare := testutil.NewBare(t, repo.R)
+	repo.Git("remote", "add", "origin", bare)
+	repo.Git("push", "-q", "-u", "origin", "main")
+	other := testutil.NewRepoWith(t, repo.R)
+	other.Git("pull", "-q", bare, "main")
+	other.Write("f.txt", "remote\n2\n3\n4\n5\n6\n")
+	other.CommitAll("two")
+	other.Git("push", "-q", bare, "main")
+	repo.Write("f.txt", "1\n2\n3\n4\n5\nlocal\n")
+	s, rec := open(t, repo)
+	if err := s.Pull(ops.PullDefault); gitexec.KindOf(err) != gitexec.KindDirtyWorktree {
+		t.Fatalf("plain pull: err = %v", err)
+	}
+	before := rec.count(EventRefsChanged)
+	if err := s.PullAutostash(ops.PullDefault); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(repo.Path("f.txt")); string(b) != "remote\n2\n3\n4\n5\nlocal\n" {
+		t.Fatalf("f.txt = %q", b)
+	}
+	if rec.count(EventRefsChanged) <= before {
+		t.Fatal("refs:changed not emitted")
+	}
+}
