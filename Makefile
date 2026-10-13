@@ -29,7 +29,10 @@ dev: helper
 build: helper
 	wails build -platform darwin/arm64 -clean
 
+# `wails build -clean` wipes build/bin, so the helper is rebuilt (fresh make
+# invocation: phony targets run once per invocation) before packaging.
 package: build
+	$(MAKE) helper
 	./scripts/package.sh
 
 # 1M-commit synthetic repository for `make bench` (about 800 MB, several minutes).
