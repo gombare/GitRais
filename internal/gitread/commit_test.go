@@ -140,3 +140,20 @@ func TestReadCommitWithExtensions(t *testing.T) {
 		t.Fatalf("sha256 detail = %+v", d)
 	}
 }
+
+func TestReadCommitAndStashesWithShowSignature(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.SignWithSSH()
+	repo.Write("a.txt", "a\n")
+	head := repo.CommitAll("signed")
+	repo.Write("a.txt", "b\n")
+	repo.Git("stash", "push", "-q", "-m", "wip")
+	d, err := ReadCommit(context.Background(), repo.R, repo.Dir, head)
+	if err != nil || d.Hash != head || d.Summary != "signed" {
+		t.Fatalf("ReadCommit = %+v, %v", d, err)
+	}
+	st, err := ReadStashes(context.Background(), repo.R, repo.Dir)
+	if err != nil || len(st) != 1 || st[0].Base != head {
+		t.Fatalf("ReadStashes = %+v, %v", st, err)
+	}
+}

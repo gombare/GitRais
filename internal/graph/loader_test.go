@@ -154,3 +154,23 @@ func TestLoadProgressNoDuplicates(t *testing.T) {
 		t.Fatalf("progress = %v, want [2 4]", progress)
 	}
 }
+
+// log.showSignature must not leak signature verification lines into the
+// parsed records.
+func TestLoadSignedCommitsWithShowSignature(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.SignWithSSH()
+	a := repo.CommitAll("signed a")
+	b := repo.CommitAll("signed b")
+	if out := repo.Git("log", "-1", "--format=%H"); !strings.Contains(out, "signature") {
+		t.Fatalf("log.showSignature not effective, log output: %q", out)
+	}
+	idx := NewIndex()
+	if err := Load(context.Background(), repo.R, repo.Dir, idx, LoadOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	rows := idx.Rows(0, 10)
+	if len(rows) != 2 || rows[0].Hash != b || rows[1].Hash != a || rows[0].Subject != "signed b" {
+		t.Fatalf("rows = %+v", rows)
+	}
+}

@@ -4,6 +4,7 @@ package testutil
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,4 +97,29 @@ func realTemp(t testing.TB) string {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// SignWithSSH makes every new commit in the repository ssh-signed with a fresh
+// temporary key and sets log.showSignature, so git log (and git show) print
+// signature verification output unless --no-show-signature is passed.
+func (r *Repo) SignWithSSH() {
+	r.t.Helper()
+	dir := realTemp(r.t)
+	key := filepath.Join(dir, "key")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", key).CombinedOutput(); err != nil {
+		r.t.Skipf("ssh-keygen unavailable: %v %s", err, out)
+	}
+	pub, err := os.ReadFile(key + ".pub")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	allowed := filepath.Join(dir, "allowed")
+	if err := os.WriteFile(allowed, []byte("test@example.com "+string(pub)), 0o644); err != nil {
+		r.t.Fatal(err)
+	}
+	r.Git("config", "gpg.format", "ssh")
+	r.Git("config", "user.signingkey", key)
+	r.Git("config", "gpg.ssh.allowedSignersFile", allowed)
+	r.Git("config", "commit.gpgsign", "true")
+	r.Git("config", "log.showSignature", "true")
 }

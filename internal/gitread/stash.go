@@ -13,7 +13,7 @@ import (
 // separated by 0x1f, with the free-text subject last, so any subject text is safe.
 func ReadStashes(ctx context.Context, r *gitexec.Runner, dir string) ([]graph.Stash, error) {
 	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: []string{
-		"stash", "list", "-z", "--format=%H%x1f%P%x1f%gd%x1f%at%x1f%an%x1f%ae%x1f%gs"}})
+		"stash", "list", "--no-show-signature", "-z", "--format=%H%x1f%P%x1f%gd%x1f%at%x1f%an%x1f%ae%x1f%gs"}})
 	if err != nil {
 		return nil, err
 	}

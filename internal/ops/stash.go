@@ -104,7 +104,7 @@ func resolveStashRef(ctx context.Context, r *gitexec.Runner, dir, ref string) (s
 	if strings.HasPrefix(ref, "stash@{") {
 		return ref, nil
 	}
-	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"stash", "list", "--format=%H%x00%gd"}, Env: gitexec.ReadOnlyEnv})
+	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Args: []string{"stash", "list", "--no-show-signature", "--format=%H%x00%gd"}, Env: gitexec.ReadOnlyEnv})
 	if err != nil {
 		return "", err
 	}

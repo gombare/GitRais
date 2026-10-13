@@ -70,7 +70,7 @@ func Load(ctx context.Context, r *gitexec.Runner, dir string, idx *Index, opt Lo
 		}
 		return nil
 	}
-	args := append([]string{"log", "-z", "--topo-order", "--no-color", logFormat}, append(revs, "--")...)
+	args := append([]string{"log", "-z", "--topo-order", "--no-color", "--no-show-signature", logFormat}, append(revs, "--")...)
 	err = r.Stream(ctx, gitexec.Cmd{Dir: dir, Args: args, Env: gitexec.ReadOnlyEnv}, 0, func(rec []byte) error {
 		if err := ctx.Err(); err != nil {
 			return err
