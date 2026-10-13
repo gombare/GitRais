@@ -434,6 +434,7 @@ export namespace ops {
 	    path: string;
 	    staged: boolean;
 	    untracked: boolean;
+	    oldPath: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new WipDiffRequest(source);
@@ -444,6 +445,7 @@ export namespace ops {
 	        this.path = source["path"];
 	        this.staged = source["staged"];
 	        this.untracked = source["untracked"];
+	        this.oldPath = source["oldPath"];
 	    }
 	}
 
