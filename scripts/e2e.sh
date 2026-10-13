@@ -16,6 +16,17 @@ if curl -sf -o /dev/null "$URL"; then
   exit 1
 fi
 
+# Pre-flight before booting wails: dependencies and the Playwright browser.
+if [ ! -d "$ROOT/frontend/node_modules" ]; then
+  echo "frontend/node_modules missing: run 'cd frontend && npm install'" >&2
+  exit 1
+fi
+CHROMIUM="$(cd "$ROOT/frontend" && node -e "process.stdout.write(require('@playwright/test').chromium.executablePath())" 2>/dev/null || true)"
+if [ -z "$CHROMIUM" ] || [ ! -e "$CHROMIUM" ]; then
+  echo "Playwright chromium missing: run 'cd frontend && npx playwright install chromium'" >&2
+  exit 1
+fi
+
 WORK="$(mktemp -d)"
 WAILS_PID=""
 cleanup() {
