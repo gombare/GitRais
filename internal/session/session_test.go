@@ -662,19 +662,79 @@ func TestStashReadFailureStillLoadsGraph(t *testing.T) {
 	}
 }
 
-// Close cancels a running local write and waits for it.
-func TestCloseCancelsRunningWrite(t *testing.T) {
-	repo := testutil.NewRepo(t)
-	repo.CommitAll("one")
+// slowPreCommit installs a pre-commit hook that touches a marker and then
+// sleeps for the given shell duration; it returns the marker path.
+func slowPreCommit(t *testing.T, repo *testutil.Repo, sleep string) string {
+	t.Helper()
 	hooks := filepath.Join(repo.Dir, ".git", "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(t.TempDir(), "started")
-	hook := "#!/bin/sh\ntouch '" + marker + "'\nsleep 30\n"
+	hook := "#!/bin/sh\ntouch '" + marker + "'\nsleep " + sleep + "\n"
 	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte(hook), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return marker
+}
+
+func waitFile(t *testing.T, p string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(p); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not appear", p)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Close lets a running local write finish (it is not killed half-way) and
+// waits for it, without emitting anything once Close has started.
+func TestCloseLetsRunningLocalWriteFinish(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	marker := slowPreCommit(t, repo, "1")
+	s, rec := open(t, repo)
+	rec.waitFor(t, "graph:progress", graphDone(1))
+	repo.Write("x.txt", "x\n")
+	repo.Git("add", "x.txt")
+	errc := make(chan error, 1)
+	go func() {
+		_, err := s.CommitChanges(bg, ops.CommitOptions{Message: "x"})
+		errc <- err
+	}()
+	waitFile(t, marker)
+	n := rec.total()
+	s.Close()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatalf("write running at Close: err = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close returned before the running write")
+	}
+	if c := repo.Git("rev-list", "--count", "HEAD"); c != "2" {
+		t.Fatalf("commits = %s, the write did not land", c)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if rec.total() != n {
+		t.Fatalf("events emitted during or after Close: %v", rec.events[n:])
+	}
+}
+
+// A local write still running after the grace period is cancelled.
+func TestCloseCancelsLocalWriteAfterGrace(t *testing.T) {
+	old := closeGrace
+	closeGrace = 300 * time.Millisecond
+	t.Cleanup(func() { closeGrace = old })
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	marker := slowPreCommit(t, repo, "30")
 	s, _ := open(t, repo)
 	repo.Write("x.txt", "x\n")
 	repo.Git("add", "x.txt")
@@ -683,16 +743,7 @@ func TestCloseCancelsRunningWrite(t *testing.T) {
 		_, err := s.CommitChanges(bg, ops.CommitOptions{Message: "x"})
 		errc <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("pre-commit hook did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitFile(t, marker)
 	start := time.Now()
 	s.Close()
 	if d := time.Since(start); d > 4*time.Second {
@@ -703,11 +754,61 @@ func TestCloseCancelsRunningWrite(t *testing.T) {
 		if err == nil {
 			t.Fatal("write cancelled by Close returned nil")
 		}
-	case <-time.After(2 * time.Second): // only the return path is left, not the 30s hook
+	case <-time.After(2 * time.Second):
 		t.Fatal("write still running after Close returned")
 	}
-	if n := repo.Git("rev-list", "--count", "HEAD"); n != "1" {
-		t.Fatalf("commits = %s, the cancelled commit landed", n)
+	if c := repo.Git("rev-list", "--count", "HEAD"); c != "1" {
+		t.Fatalf("commits = %s, the cancelled commit landed", c)
+	}
+}
+
+// A hanging remote operation is cancelled at once by Close.
+func TestCloseCancelsRemoteOpFast(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	marker := filepath.Join(t.TempDir(), "ssh")
+	// GIT_SSH_COMMAND, not core.sshCommand: the go tool exports its own
+	// GIT_SSH_COMMAND to tests, which would win over the config.
+	repo.R.Env = append(repo.R.Env, "GIT_SSH_COMMAND=touch '"+marker+"'; sleep 30; false")
+	repo.Git("remote", "add", "origin", "ssh://example.invalid/x.git")
+	s, _ := open(t, repo)
+	errc := make(chan error, 1)
+	go func() { errc <- s.Fetch() }()
+	waitFile(t, marker)
+	start := time.Now()
+	s.Close()
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("Close took %v with a hanging fetch", d)
+	}
+	if err := <-errc; err == nil {
+		t.Fatal("fetch cancelled by Close returned nil")
+	}
+}
+
+// A write still waiting for the write lock when Close runs never starts.
+func TestCloseRejectsQueuedWrite(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.CommitAll("one")
+	s, _ := open(t, repo)
+	s.writeSem <- struct{}{} // a write in progress holds the lock
+	repo.Write("x.txt", "x\n")
+	errc := make(chan error, 1)
+	go func() { errc <- s.StageAll(bg) }()
+	time.Sleep(100 * time.Millisecond)
+	done := make(chan struct{})
+	go func() { s.Close(); close(done) }()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrClosed) {
+			t.Fatalf("queued write: err = %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued write not released by Close")
+	}
+	<-s.writeSem
+	<-done
+	if st := repo.Git("status", "--porcelain"); st != "?? x.txt" {
+		t.Fatalf("status = %q, the queued write ran", st)
 	}
 }
 

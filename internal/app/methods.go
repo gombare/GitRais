@@ -236,6 +236,11 @@ func with[T any](a *App, tab string, fn func(*session.Session) (T, error)) (T, e
 	return v, nil
 }
 
+// writeCtx is the context of local writes. Unlike a.ctx it is not cancelled
+// by Shutdown: the session's Close lets a running local write finish (within
+// its grace period) and refuses the queued ones itself.
+func (a *App) writeCtx() context.Context { return context.WithoutCancel(a.ctx) }
+
 func do(a *App, tab string, fn func(*session.Session) error) error {
 	_, err := with(a, tab, func(s *session.Session) (struct{}, error) { return struct{}{}, fn(s) })
 	return err
@@ -308,48 +313,48 @@ func (a *App) LastCommitMessage(tab string) (string, error) {
 // RemoveIndexLock removes the tab's stale index.lock after the backend checks
 // that no process holds it. The frontend confirms with the user first.
 func (a *App) RemoveIndexLock(tab string) error {
-	return do(a, tab, func(s *session.Session) error { return s.RemoveIndexLock(a.ctx) })
+	return do(a, tab, func(s *session.Session) error { return s.RemoveIndexLock(a.writeCtx()) })
 }
 
 func (a *App) Stage(tab string, paths []string) error {
-	return do(a, tab, func(s *session.Session) error { return s.Stage(a.ctx, paths) })
+	return do(a, tab, func(s *session.Session) error { return s.Stage(a.writeCtx(), paths) })
 }
 
 func (a *App) Unstage(tab string, paths []string) error {
-	return do(a, tab, func(s *session.Session) error { return s.Unstage(a.ctx, paths) })
+	return do(a, tab, func(s *session.Session) error { return s.Unstage(a.writeCtx(), paths) })
 }
 
 func (a *App) StageAll(tab string) error {
-	return do(a, tab, func(s *session.Session) error { return s.StageAll(a.ctx) })
+	return do(a, tab, func(s *session.Session) error { return s.StageAll(a.writeCtx()) })
 }
 
 func (a *App) UnstageAll(tab string) error {
-	return do(a, tab, func(s *session.Session) error { return s.UnstageAll(a.ctx) })
+	return do(a, tab, func(s *session.Session) error { return s.UnstageAll(a.writeCtx()) })
 }
 
 func (a *App) Discard(tab string, tracked, untracked []string) error {
-	return do(a, tab, func(s *session.Session) error { return s.Discard(a.ctx, tracked, untracked) })
+	return do(a, tab, func(s *session.Session) error { return s.Discard(a.writeCtx(), tracked, untracked) })
 }
 
 func (a *App) StageLines(tab string, req session.StageLinesRequest) error {
-	return do(a, tab, func(s *session.Session) error { return s.StageLines(a.ctx, req) })
+	return do(a, tab, func(s *session.Session) error { return s.StageLines(a.writeCtx(), req) })
 }
 
 // Commit returns the new commit's hash.
 func (a *App) Commit(tab string, o ops.CommitOptions) (string, error) {
-	return with(a, tab, func(s *session.Session) (string, error) { return s.CommitChanges(a.ctx, o) })
+	return with(a, tab, func(s *session.Session) (string, error) { return s.CommitChanges(a.writeCtx(), o) })
 }
 
 func (a *App) CreateBranch(tab, name, start string, checkout bool) error {
-	return do(a, tab, func(s *session.Session) error { return s.CreateBranch(a.ctx, name, start, checkout) })
+	return do(a, tab, func(s *session.Session) error { return s.CreateBranch(a.writeCtx(), name, start, checkout) })
 }
 
 func (a *App) RenameBranch(tab, oldName, newName string) error {
-	return do(a, tab, func(s *session.Session) error { return s.RenameBranch(a.ctx, oldName, newName) })
+	return do(a, tab, func(s *session.Session) error { return s.RenameBranch(a.writeCtx(), oldName, newName) })
 }
 
 func (a *App) DeleteBranch(tab, name string, force bool) error {
-	return do(a, tab, func(s *session.Session) error { return s.DeleteBranch(a.ctx, name, force) })
+	return do(a, tab, func(s *session.Session) error { return s.DeleteBranch(a.writeCtx(), name, force) })
 }
 
 func (a *App) DeleteRemoteBranch(tab, remote, branch string) error {
@@ -357,19 +362,19 @@ func (a *App) DeleteRemoteBranch(tab, remote, branch string) error {
 }
 
 func (a *App) SetUpstream(tab, branch, upstream string) error {
-	return do(a, tab, func(s *session.Session) error { return s.SetUpstream(a.ctx, branch, upstream) })
+	return do(a, tab, func(s *session.Session) error { return s.SetUpstream(a.writeCtx(), branch, upstream) })
 }
 
 func (a *App) Checkout(tab string, t ops.CheckoutTarget) error {
-	return do(a, tab, func(s *session.Session) error { return s.Checkout(a.ctx, t) })
+	return do(a, tab, func(s *session.Session) error { return s.Checkout(a.writeCtx(), t) })
 }
 
 func (a *App) CreateTag(tab, name, target, message string) error {
-	return do(a, tab, func(s *session.Session) error { return s.CreateTag(a.ctx, name, target, message) })
+	return do(a, tab, func(s *session.Session) error { return s.CreateTag(a.writeCtx(), name, target, message) })
 }
 
 func (a *App) DeleteTag(tab, name string) error {
-	return do(a, tab, func(s *session.Session) error { return s.DeleteTag(a.ctx, name) })
+	return do(a, tab, func(s *session.Session) error { return s.DeleteTag(a.writeCtx(), name) })
 }
 
 func (a *App) PushTag(tab, remote, name string) error {
@@ -377,22 +382,22 @@ func (a *App) PushTag(tab, remote, name string) error {
 }
 
 func (a *App) StashPush(tab, message string, untracked bool) error {
-	return do(a, tab, func(s *session.Session) error { return s.StashPush(a.ctx, message, untracked) })
+	return do(a, tab, func(s *session.Session) error { return s.StashPush(a.writeCtx(), message, untracked) })
 }
 
 // StashApply, StashPop and StashDrop take the stash commit HASH
 // (graph.Stash.Hash / RowDTO.Hash of a stash row), not "stash@{N}": the
 // index shifts when stashes change, the hash does not.
 func (a *App) StashApply(tab, ref string) error {
-	return do(a, tab, func(s *session.Session) error { return s.StashApply(a.ctx, ref) })
+	return do(a, tab, func(s *session.Session) error { return s.StashApply(a.writeCtx(), ref) })
 }
 
 func (a *App) StashPop(tab, ref string) error {
-	return do(a, tab, func(s *session.Session) error { return s.StashPop(a.ctx, ref) })
+	return do(a, tab, func(s *session.Session) error { return s.StashPop(a.writeCtx(), ref) })
 }
 
 func (a *App) StashDrop(tab, ref string) error {
-	return do(a, tab, func(s *session.Session) error { return s.StashDrop(a.ctx, ref) })
+	return do(a, tab, func(s *session.Session) error { return s.StashDrop(a.writeCtx(), ref) })
 }
 
 func (a *App) Fetch(tab string) error {

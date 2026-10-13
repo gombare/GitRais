@@ -72,6 +72,10 @@ var (
 	beforeGraphProgress func(gen uint64)
 )
 
+// closeGrace is how long Close lets a running local write finish before
+// cancelling it. It fits the app's 10 s shutdown budget with room for the kill.
+var closeGrace = 8 * time.Second
+
 // watchDebounce coalesces bursts of file events into one notification.
 const watchDebounce = 300 * time.Millisecond
 
@@ -90,8 +94,12 @@ type Session struct {
 
 	r      *gitexec.Runner
 	emitFn Emitter
-	ctx    context.Context // lives until Close
+	ctx    context.Context // lives until Close: remote ops, graph loads, queued writes
 	cancel context.CancelFunc
+	// writeCtx outlives ctx by up to closeGrace so that Close does not kill a
+	// running local write half-way.
+	writeCtx    context.Context
+	writeCancel context.CancelFunc
 
 	emitMu sync.RWMutex // read-held while emitting; Close write-locks it to set closed
 	closed bool
@@ -118,7 +126,9 @@ type Session struct {
 // returned Session must be closed with Close.
 func Open(id, dir string, r *gitexec.Runner, emit Emitter) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Session{ID: id, r: r, emitFn: emit, ctx: ctx, cancel: cancel, writeSem: make(chan struct{}, 1)}
+	wctx, wcancel := context.WithCancel(context.Background())
+	s := &Session{ID: id, r: r, emitFn: emit, ctx: ctx, cancel: cancel, writeCtx: wctx, writeCancel: wcancel,
+		writeSem: make(chan struct{}, 1)}
 	if err := s.open(dir); err != nil {
 		s.Close()
 		return nil, err
@@ -183,16 +193,20 @@ func revParse(ctx context.Context, r *gitexec.Runner, dir string, flags ...strin
 	return filepath.EvalSymlinks(strings.TrimSpace(string(out)))
 }
 
-// Close stops the watchers, cancels the graph load and every running write
-// (local or remote), and waits for them. After it returns no event is emitted
-// and no write runs. It is idempotent and must not be called from the Emitter.
+// Close stops the watchers and cancels the graph load, the remote operation
+// and the writes still waiting for the write lock at once. A local write
+// already running is given closeGrace to finish (killing git half-way through
+// a checkout or a commit hook is worse than waiting), then cancelled. Close
+// waits for all of them. Nothing is emitted once Close has started, and no
+// write runs after it returns. It is idempotent and must not be called from
+// the Emitter.
 func (s *Session) Close() {
 	s.once.Do(func() {
 		s.emitMu.Lock()
 		s.closed = true
 		s.emitMu.Unlock()
 
-		s.cancel() // also cancels writes, remote ops and the ignore filter
+		s.cancel() // remote ops, queued writes, the ignore filter
 
 		s.loadMu.Lock()
 		s.loadClosed = true
@@ -206,7 +220,19 @@ func (s *Session) Close() {
 		for _, w := range s.watchers {
 			w.Close()
 		}
-		s.writeWG.Wait()
+		writesDone := make(chan struct{})
+		go func() {
+			s.writeWG.Wait()
+			close(writesDone)
+		}()
+		grace := time.NewTimer(closeGrace)
+		select {
+		case <-writesDone:
+		case <-grace.C:
+		}
+		grace.Stop()
+		s.writeCancel()
+		<-writesDone
 		s.loadWG.Wait()
 	})
 }
@@ -429,7 +455,9 @@ func (s *Session) unlock() { <-s.writeSem }
 // itself causes) and notifies the frontend when it is over, even on error.
 // refs says whether refs/HEAD may have moved (graph reload) or only the
 // working tree and index changed. Errors from fn are returned unchanged. fn runs
-// under a context cancelled by ctx or by Close, which waits for it.
+// under a context cancelled by ctx or by Close (after closeGrace), which waits
+// for it. A write that has not acquired the lock when Close runs returns
+// ErrClosed.
 func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context) error) error {
 	s.loadMu.Lock()
 	if s.loadClosed {
@@ -442,13 +470,16 @@ func (s *Session) write(ctx context.Context, refs bool, fn func(context.Context)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
+	stop := context.AfterFunc(s.writeCtx, cancel)
 	defer stop()
 
 	if err := s.lock(ctx); err != nil {
 		return err
 	}
 	defer s.unlock()
+	if s.ctx.Err() != nil { // the lock and Close raced: never start after Close
+		return ErrClosed
+	}
 	resumes := make([]func(bool), 0, len(s.watchers))
 	for _, w := range s.watchers {
 		resumes = append(resumes, w.Suspend())

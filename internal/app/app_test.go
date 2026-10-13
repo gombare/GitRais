@@ -789,3 +789,45 @@ func TestRepoNameFromURL(t *testing.T) {
 		}
 	}
 }
+
+// Shutdown lets a local write that is already running finish.
+func TestShutdownLetsRunningCommitFinish(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("one")
+	hooks := filepath.Join(repo.Dir, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "started")
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\ntouch '"+marker+"'\nsleep 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tab, err := a.OpenRepo(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.Write("x.txt", "x\n")
+	repo.Git("add", "x.txt")
+	errc := make(chan error, 1)
+	go func() {
+		_, err := a.Commit(tab.ID, ops.CommitOptions{Message: "x"})
+		errc <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pre-commit hook did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	a.shutdown()
+	if err := <-errc; err != nil {
+		t.Fatalf("commit running at shutdown: %v", err)
+	}
+	if c := repo.Git("rev-list", "--count", "HEAD"); c != "2" {
+		t.Fatalf("commits = %s, the commit did not land", c)
+	}
+}

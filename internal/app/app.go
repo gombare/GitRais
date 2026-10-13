@@ -28,7 +28,8 @@ import (
 const EnvLogPath = "GITRAIS_LOG_PATH"
 
 // shutdownTimeout bounds how long Shutdown waits for sessions to close (a
-// Session.Close can take up to ~7 s when it has to kill a git process).
+// Session.Close lets a running local write finish for up to 8 s, then
+// cancels it; git normally dies on the SIGTERM at once).
 const shutdownTimeout = 10 * time.Second
 
 type Config struct {
