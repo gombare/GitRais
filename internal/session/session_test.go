@@ -342,7 +342,7 @@ func TestReadsCommitAndDiffs(t *testing.T) {
 	s, rec := open(t, repo)
 	rec.waitFor(t, "graph:progress", graphDone(2))
 
-	// Concurrent detail reads exercise the go-git serialization under -race.
+	// Concurrent detail reads run under -race.
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
@@ -787,5 +787,36 @@ func TestStageLinesFingerprintNonUTF8(t *testing.T) {
 	}
 	if err := s.StageLines(bg, StageLinesRequest{Path: "lat.txt", Hunk: 0, Expect: &fp}); err != nil {
 		t.Fatalf("whole hunk of a Latin-1 file: %v", err)
+	}
+}
+
+// Repositories with extensions go-git rejects (worktreeConfig after a sparse
+// checkout, sha256 object format) open and their commits are readable.
+func TestOpenRepoWithExtensions(t *testing.T) {
+	r := testutil.Runner(t)
+	sparse := testutil.NewRepoWith(t, r)
+	sparse.Write("x/a.txt", "a\n")
+	sparse.Write("y/b.txt", "b\n")
+	sparse.CommitAll("base")
+	sparse.Git("sparse-checkout", "set", "x")
+
+	shaDir := filepath.Join(t.TempDir(), "sha256")
+	if _, err := r.Run(bg, gitexec.Cmd{Args: []string{"init", "-q", "-b", "main", "--object-format=sha256", shaDir}}); err != nil {
+		t.Fatal(err)
+	}
+	sha := &testutil.Repo{Dir: shaDir, R: r}
+	sha.Dir, _ = filepath.EvalSymlinks(shaDir)
+	if _, err := r.Run(bg, gitexec.Cmd{Dir: sha.Dir, Args: []string{"commit", "-q", "--allow-empty", "-m", "sha root"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, repo := range []*testutil.Repo{sparse, sha} {
+		s, rec := open(t, repo)
+		rec.waitFor(t, "graph:progress", graphDone(1))
+		head := rows0(s)
+		d, err := s.Commit(bg, head)
+		if err != nil || d.Hash != head {
+			t.Fatalf("%s: Commit = %+v, %v", repo.Dir, d, err)
+		}
 	}
 }

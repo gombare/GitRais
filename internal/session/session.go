@@ -13,8 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-
 	"gitrais/internal/diff"
 	"gitrais/internal/gitexec"
 	"gitrais/internal/gitread"
@@ -86,9 +84,7 @@ const watchDebounce = 300 * time.Millisecond
 //     watcher events; the session emits wip:changed (and refs:changed plus a graph
 //     reload when refs may have moved) itself once the write is over, also on error;
 //   - at most one remote operation runs at a time (ErrOpInProgress otherwise); it
-//     is cancellable with CancelOp, also while waiting for the write lock;
-//   - go-git's *git.Repository is not safe for concurrent use, so every access to
-//     it goes through repoMu.
+//     is cancellable with CancelOp, also while waiting for the write lock.
 type Session struct {
 	ID, Dir, GitDir string
 
@@ -100,10 +96,6 @@ type Session struct {
 	emitMu sync.RWMutex // read-held while emitting; Close write-locks it to set closed
 	closed bool
 	once   sync.Once
-
-	repoMu    sync.Mutex
-	repo      *git.Repository
-	repoStale atomic.Bool // refs changed: reopen before the next go-git read
 
 	idx atomic.Pointer[graph.Index]
 
@@ -149,9 +141,6 @@ func (s *Session) open(dir string) error {
 		return err
 	}
 	s.Dir, s.GitDir = top, gitDir
-	if s.repo, err = gitread.OpenRepo(top); err != nil {
-		return err
-	}
 
 	// The worktree and its git dir; the git dir needs its own path when it does
 	// not live under the worktree (linked worktree, --separate-git-dir).
@@ -231,7 +220,7 @@ func (s *Session) emit(event string, data any) {
 }
 
 // onFS is the watchers' callback. It must not block (Close waits for it): it
-// only emits, marks the go-git handle stale and starts an asynchronous reload.
+// only emits and starts an asynchronous reload.
 func (s *Session) onFS(k watch.Kind) {
 	if k&watch.WIP != 0 {
 		s.emit(EventWipChanged, TabEvent{s.ID})
@@ -243,9 +232,6 @@ func (s *Session) onFS(k watch.Kind) {
 
 // refsChanged notifies the frontend and rebuilds the graph. Non-blocking.
 func (s *Session) refsChanged() {
-	// go-git caches packfiles and refs: reopen on the next read so that new
-	// objects (fetched, committed elsewhere) are visible.
-	s.repoStale.Store(true)
 	s.emit(EventRefsChanged, TabEvent{s.ID})
 	s.Reload()
 }
@@ -372,22 +358,11 @@ func validHash(h string) error {
 }
 
 // Commit returns the metadata and changed files of a commit (full hash).
-// Calls are serialized on the go-git handle (not safe for concurrent use).
 func (s *Session) Commit(ctx context.Context, hash string) (gitread.CommitDetail, error) {
 	if err := validHash(hash); err != nil {
 		return gitread.CommitDetail{}, err
 	}
-	s.repoMu.Lock()
-	defer s.repoMu.Unlock()
-	if s.repoStale.Swap(false) {
-		repo, err := gitread.OpenRepo(s.Dir)
-		if err != nil {
-			s.repoStale.Store(true)
-			return gitread.CommitDetail{}, err
-		}
-		s.repo = repo
-	}
-	return gitread.ReadCommit(ctx, s.r, s.repo, s.Dir, hash)
+	return gitread.ReadCommit(ctx, s.r, s.Dir, hash)
 }
 
 func (s *Session) WipDiff(ctx context.Context, req ops.WipDiffRequest) (diff.FileDiff, error) {

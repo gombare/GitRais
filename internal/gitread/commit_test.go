@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"gitrais/internal/gitexec"
 	"gitrais/internal/testutil"
 )
 
@@ -25,11 +26,7 @@ func TestReadCommit(t *testing.T) {
 	repo.Git("commit", "-q", "-m", "summary line\n\nbody line 1\nbody line 2")
 	head := repo.Git("rev-parse", "HEAD")
 
-	g, err := OpenRepo(repo.Dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := ReadCommit(context.Background(), repo.R, g, repo.Dir, head)
+	d, err := ReadCommit(context.Background(), repo.R, repo.Dir, head)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +51,7 @@ func TestReadCommit(t *testing.T) {
 		t.Fatalf("binary = %+v", f)
 	}
 
-	rd, err := ReadCommit(context.Background(), repo.R, g, repo.Dir, root)
+	rd, err := ReadCommit(context.Background(), repo.R, repo.Dir, root)
 	if err != nil || len(rd.Files) != 3 || len(rd.Parents) != 0 {
 		t.Fatalf("root = %+v %v", rd, err)
 	}
@@ -94,5 +91,52 @@ func TestChangedFilesRejectsOptionRevs(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err == nil {
 		t.Fatal("git wrote the --output file")
+	}
+}
+
+// Repositories using git extensions that go-git does not know must still be
+// readable: metadata comes from the bundled git.
+func TestReadCommitWithExtensions(t *testing.T) {
+	r := testutil.Runner(t)
+	sparse := testutil.NewRepoWith(t, r)
+	sparse.Write("x/a.txt", "a\n")
+	sparse.Write("y/b.txt", "b\n")
+	sparse.CommitAll("base")
+	sparse.Git("sparse-checkout", "set", "x") // sets extensions.worktreeConfig=true
+	if v := sparse.Git("config", "extensions.worktreeConfig"); v != "true" {
+		t.Fatalf("extensions.worktreeConfig = %q", v)
+	}
+
+	shaDir := filepath.Join(t.TempDir(), "sha256")
+	if _, err := r.Run(context.Background(), gitexec.Cmd{Args: []string{"init", "-q", "-b", "main", "--object-format=sha256", shaDir}}); err != nil {
+		t.Fatal(err)
+	}
+	run := func(dir string, args ...string) string {
+		out, err := r.Run(context.Background(), gitexec.Cmd{Dir: dir, Args: args})
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.WriteFile(filepath.Join(shaDir, "f.txt"), []byte("f\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(shaDir, "add", "-A")
+	run(shaDir, "commit", "-q", "-m", "sha256 root")
+	run(shaDir, "commit", "-q", "--allow-empty", "-m", "sha256 second\n\nthe body")
+
+	for _, dir := range []string{sparse.Dir, shaDir} {
+		head := run(dir, "rev-parse", "HEAD")
+		d, err := ReadCommit(context.Background(), r, dir, head)
+		if err != nil {
+			t.Fatalf("%s: %v", dir, err)
+		}
+		if d.Hash != head || d.Author != "Test" || d.AuthorEmail != "test@example.com" || d.CommitTime == 0 {
+			t.Fatalf("%s: detail = %+v", dir, d)
+		}
+	}
+	d, _ := ReadCommit(context.Background(), r, shaDir, run(shaDir, "rev-parse", "HEAD"))
+	if d.Summary != "sha256 second" || d.Body != "the body" || len(d.Parents) != 1 || len(d.Parents[0]) != 64 {
+		t.Fatalf("sha256 detail = %+v", d)
 	}
 }

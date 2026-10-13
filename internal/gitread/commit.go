@@ -2,11 +2,9 @@ package gitread
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 
 	"gitrais/internal/gitexec"
 )
@@ -36,29 +34,36 @@ type CommitDetail struct {
 	Files          []FileChange `json:"files"`
 }
 
-// OpenRepo opens the repository at dir (or a parent containing .git).
-func OpenRepo(dir string) (*git.Repository, error) {
-	return git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
-}
+// commitFormat lists the fields ReadCommit asks git log for, separated by
+// \x1f. The raw message (%B) is last, so it may contain anything but NUL.
+const commitFormat = "%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%B"
 
-// ReadCommit reads a commit's metadata via go-git and its changed files via
-// git. Merges are compared with their first parent, root commits with the
-// empty tree.
-func ReadCommit(ctx context.Context, r *gitexec.Runner, repo *git.Repository, dir, hash string) (CommitDetail, error) {
-	c, err := repo.CommitObject(plumbing.NewHash(hash))
+// ReadCommit reads a commit's metadata and its changed files with the bundled
+// git (go-git rejects repositories using extensions such as worktreeConfig,
+// partialClone, objectFormat=sha256 or refStorage). Merges are compared with
+// their first parent, root commits with the empty tree.
+func ReadCommit(ctx context.Context, r *gitexec.Runner, dir, hash string) (CommitDetail, error) {
+	out, err := r.Run(ctx, gitexec.Cmd{Dir: dir, Env: gitexec.ReadOnlyEnv, Args: []string{
+		"log", "-1", "--no-show-signature", "--no-color", "-z", "--format=" + commitFormat,
+		"--end-of-options", hash, "--"}})
 	if err != nil {
 		return CommitDetail{}, err
 	}
-	msg := strings.TrimRight(c.Message, "\n")
+	rec, _, _ := strings.Cut(string(out), "\x00")
+	f := strings.SplitN(rec, "\x1f", 9)
+	if len(f) != 9 {
+		return CommitDetail{}, fmt.Errorf("unexpected git log output for %s", hash)
+	}
+	msg := strings.TrimRight(f[8], "\n")
 	summary, body, _ := strings.Cut(msg, "\n")
 	d := CommitDetail{
-		Hash: c.Hash.String(), Summary: summary, Body: strings.TrimLeft(body, "\n"),
-		Author: c.Author.Name, AuthorEmail: c.Author.Email, AuthorTime: c.Author.When.Unix(),
-		Committer: c.Committer.Name, CommitterEmail: c.Committer.Email, CommitTime: c.Committer.When.Unix(),
+		Hash: f[0], Summary: summary, Body: strings.TrimLeft(body, "\n"),
+		Author: f[2], AuthorEmail: f[3], AuthorTime: atoi64(f[4]),
+		Committer: f[5], CommitterEmail: f[6], CommitTime: atoi64(f[7]),
 		Parents: []string{},
 	}
-	for _, p := range c.ParentHashes {
-		d.Parents = append(d.Parents, p.String())
+	if f[1] != "" {
+		d.Parents = strings.Fields(f[1])
 	}
 	var from string
 	if len(d.Parents) > 0 {
@@ -145,4 +150,9 @@ func parseNumstat(s string) map[string]numstat {
 		res[path] = ns
 	}
 	return res
+}
+
+func atoi64(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }
