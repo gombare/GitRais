@@ -26,9 +26,13 @@ var diffBase = []string{
 
 var diffEnv = append(append([]string{}, gitexec.ReadOnlyEnv...), literalPaths...)
 
-// WipDiff returns the diff of one working-tree file: unstaged (index to
+// WipDiff returns the diff of one working-tree file (a repository-relative
+// path, ErrInvalidFilePath otherwise): unstaged (index to
 // worktree), staged (HEAD to index) or untracked (against /dev/null).
 func WipDiff(ctx context.Context, r *gitexec.Runner, dir string, req WipDiffRequest) (diff.FileDiff, error) {
+	if err := checkRelPath(req.Path); err != nil {
+		return diff.FileDiff{}, err
+	}
 	args := append([]string{}, diffBase...)
 	switch {
 	case req.Untracked:
@@ -49,6 +53,14 @@ func WipDiff(ctx context.Context, r *gitexec.Runner, dir string, req WipDiffRequ
 // CommitFileDiff returns the diff of one file between two revisions. oldPath
 // is the pre-rename path, if any.
 func CommitFileDiff(ctx context.Context, r *gitexec.Runner, dir, from, to, path, oldPath string) (diff.FileDiff, error) {
+	if err := checkRelPath(path); err != nil {
+		return diff.FileDiff{}, err
+	}
+	if oldPath != "" {
+		if err := checkRelPath(oldPath); err != nil {
+			return diff.FileDiff{}, err
+		}
+	}
 	args := append(append([]string{}, diffBase...), "--end-of-options", from, to, "--", path)
 	if oldPath != "" && oldPath != path {
 		args = append(args, oldPath)
