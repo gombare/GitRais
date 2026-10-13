@@ -79,6 +79,8 @@ export function RenameBranch(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function RestoreTabs():Promise<Array<app.TabInfo>>;
 
+export function RevealInFinder(arg1:string,arg2:string):Promise<void>;
+
 export function Rows(arg1:string,arg2:number,arg3:number):Promise<Array<app.RowDTO>>;
 
 export function SaveDraft(arg1:string,arg2:store.Draft):Promise<void>;

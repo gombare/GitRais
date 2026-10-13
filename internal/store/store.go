@@ -26,6 +26,10 @@ type Draft struct {
 type Layout struct {
 	LeftWidth  int `json:"leftWidth"`
 	RightWidth int `json:"rightWidth"`
+	// Widths of the graph's author and date columns; 0 (absent in older
+	// files) means the frontend's default.
+	GraphAuthorWidth int `json:"graphAuthorWidth,omitempty"`
+	GraphDateWidth   int `json:"graphDateWidth,omitempty"`
 }
 
 // Settings are the user preferences.

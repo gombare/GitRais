@@ -81,11 +81,13 @@ type App struct {
 
 	emitFn  func(string, any)
 	pickDir func(title string) (string, error)
+	// reveal shows an absolute path in the Finder (a test seam).
+	reveal func(abs string) error
 }
 
 func New() *App {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &App{ctx: ctx, cancel: cancel, sessions: map[string]*tabEntry{}, done: make(chan struct{})}
+	return &App{ctx: ctx, cancel: cancel, sessions: map[string]*tabEntry{}, done: make(chan struct{}), reveal: revealInFinder}
 }
 
 // NewWithConfig creates an App without the Wails runtime (tests, E2E). The
@@ -313,6 +315,15 @@ func newID() string {
 	b := make([]byte, 8)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// revealInFinder selects abs in a Finder window. abs is absolute (it starts
+// with "/"), so open never reads it as an option.
+func revealInFinder(abs string) error {
+	if !filepath.IsAbs(abs) {
+		return errInvalidPath
+	}
+	return exec.Command("open", "-R", abs).Run()
 }
 
 // OpenActivityLog opens the git activity log in the default viewer.

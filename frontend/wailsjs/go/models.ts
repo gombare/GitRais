@@ -458,6 +458,7 @@ export namespace session {
 	    intervalSeconds: number;
 	    paused: boolean;
 	    reason: string;
+	    lastFetch: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new AutoFetchStatus(source);
@@ -469,6 +470,7 @@ export namespace session {
 	        this.intervalSeconds = source["intervalSeconds"];
 	        this.paused = source["paused"];
 	        this.reason = source["reason"];
+	        this.lastFetch = source["lastFetch"];
 	    }
 	}
 	export class FingerprintLine {
@@ -652,6 +654,8 @@ export namespace store {
 	export class Layout {
 	    leftWidth: number;
 	    rightWidth: number;
+	    graphAuthorWidth?: number;
+	    graphDateWidth?: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new Layout(source);
@@ -661,6 +665,8 @@ export namespace store {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.leftWidth = source["leftWidth"];
 	        this.rightWidth = source["rightWidth"];
+	        this.graphAuthorWidth = source["graphAuthorWidth"];
+	        this.graphDateWidth = source["graphDateWidth"];
 	    }
 	}
 	export class Settings {

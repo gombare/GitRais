@@ -142,6 +142,10 @@ export function RestoreTabs() {
   return window['go']['app']['App']['RestoreTabs']();
 }
 
+export function RevealInFinder(arg1, arg2) {
+  return window['go']['app']['App']['RevealInFinder'](arg1, arg2);
+}
+
 export function Rows(arg1, arg2, arg3) {
   return window['go']['app']['App']['Rows'](arg1, arg2, arg3);
 }

@@ -917,3 +917,33 @@ func TestSettingsBindingsApplyAutoFetch(t *testing.T) {
 		t.Fatal("unknown tab must be NoTab")
 	}
 }
+
+func TestRevealInFinder(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.Write("dir/a.txt", "a\n")
+	repo.CommitAll("one")
+	var revealed []string
+	a.reveal = func(p string) error { revealed = append(revealed, p); return nil }
+	ti, err := a.OpenRepo(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := filepath.EvalSymlinks(repo.Dir)
+	if err := a.RevealInFinder(ti.ID, "dir/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if len(revealed) != 1 || revealed[0] != filepath.Join(root, "dir", "a.txt") {
+		t.Fatalf("revealed %v", revealed)
+	}
+	for _, p := range []string{"../outside", "/etc/passwd", ".git/config", ""} {
+		if k := decodeUIError(t, a.RevealInFinder(ti.ID, p)).Kind; k != "InvalidFilePath" {
+			t.Errorf("%q: kind %s", p, k)
+		}
+	}
+	if len(revealed) != 1 {
+		t.Fatalf("an invalid path reached the file manager: %v", revealed)
+	}
+	if decodeUIError(t, a.RevealInFinder("nope", "dir/a.txt")).Kind != "NoTab" {
+		t.Fatal("unknown tab must be NoTab")
+	}
+}

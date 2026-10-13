@@ -213,3 +213,22 @@ func TestNormalizeSettingsBounds(t *testing.T) {
 		t.Fatalf("MaxAutoFetchSeconds = %d", MaxAutoFetchSeconds)
 	}
 }
+
+// The graph column widths are optional: an older file (without them) loads as
+// 0 (= the frontend's defaults) with the other layout values kept, and set
+// values survive a round trip.
+func TestLayoutGraphColumns(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
+	os.WriteFile(p, []byte(`{"layout":{"leftWidth":300,"rightWidth":400}}`), 0o600)
+	st, err := Open(p).Load()
+	if err != nil || st.Layout != (Layout{LeftWidth: 300, RightWidth: 400}) {
+		t.Fatalf("old file = %+v %v", st.Layout, err)
+	}
+	l := Layout{LeftWidth: 300, RightWidth: 400, GraphAuthorWidth: 150, GraphDateWidth: 110}
+	if _, err := Open(p).Update(func(st *State) { st.Layout = l }); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = Open(p).Load(); err != nil || st.Layout != l {
+		t.Fatalf("reload = %+v %v", st.Layout, err)
+	}
+}

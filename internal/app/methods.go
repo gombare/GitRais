@@ -360,6 +360,20 @@ func (a *App) LastCommitMessage(tab string) (string, error) {
 	return with(a, tab, func(s *session.Session) (string, error) { return s.LastCommitMessage(a.ctx) })
 }
 
+// RevealInFinder shows a working-tree file of the tab's repository in the
+// Finder. path is relative to the repository root (InvalidFilePath when it is
+// not a clean relative path, or crosses a symbolic link); a file that no
+// longer exists is shown through its nearest existing parent directory.
+func (a *App) RevealInFinder(tab, path string) error {
+	return do(a, tab, func(s *session.Session) error {
+		abs, err := ops.WorktreePath(s.Dir, path)
+		if err != nil {
+			return err
+		}
+		return a.reveal(abs)
+	})
+}
+
 // RemoveIndexLock removes the tab's stale index.lock after the backend checks
 // that no process holds it. The frontend confirms with the user first.
 func (a *App) RemoveIndexLock(tab string) error {
