@@ -2,6 +2,7 @@ package ops
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gitrais/internal/testutil"
@@ -28,5 +29,20 @@ func TestDiffsRejectInvalidPaths(t *testing.T) {
 				t.Errorf("CommitFileDiff(oldPath %q) err = %v", p, err)
 			}
 		}
+	}
+}
+
+// A staged rename shows as R when the old path is passed along.
+func TestWipDiffStagedRename(t *testing.T) {
+	repo := testutil.NewRepo(t)
+	repo.Write("old.txt", strings.Repeat("line\n", 20))
+	repo.CommitAll("one")
+	repo.Git("mv", "old.txt", "new.txt")
+	fd, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "new.txt", OldPath: "old.txt", Staged: true})
+	if err != nil || fd.Status != "R" || fd.OldPath != "old.txt" || fd.NewPath != "new.txt" {
+		t.Fatalf("staged rename = %+v, %v", fd, err)
+	}
+	if _, err := WipDiff(bg, repo.R, repo.Dir, WipDiffRequest{Path: "new.txt", OldPath: "../x", Staged: true}); !errors.Is(err, ErrInvalidFilePath) {
+		t.Fatalf("invalid oldPath: err = %v", err)
 	}
 }

@@ -14,6 +14,9 @@ type WipDiffRequest struct {
 	Path      string `json:"path"`
 	Staged    bool   `json:"staged"`
 	Untracked bool   `json:"untracked"`
+	// OldPath is the pre-rename path of a staged rename, so the staged diff
+	// pairs both sides (status R) instead of showing an added file.
+	OldPath string `json:"oldPath"`
 }
 
 // diffBase pins the path prefixes so user config (diff.noprefix,
@@ -33,12 +36,20 @@ func WipDiff(ctx context.Context, r *gitexec.Runner, dir string, req WipDiffRequ
 	if err := checkRelPath(req.Path); err != nil {
 		return diff.FileDiff{}, err
 	}
+	if req.OldPath != "" {
+		if err := checkRelPath(req.OldPath); err != nil {
+			return diff.FileDiff{}, err
+		}
+	}
 	args := append([]string{}, diffBase...)
 	switch {
 	case req.Untracked:
 		args = append(args, "--no-index", "--", "/dev/null", req.Path)
 	case req.Staged:
 		args = append(args, "--cached", "--", req.Path)
+		if req.OldPath != "" && req.OldPath != req.Path {
+			args = append(args, req.OldPath) // diffBase has -M: paired as a rename
+		}
 	default:
 		args = append(args, "--", req.Path)
 	}

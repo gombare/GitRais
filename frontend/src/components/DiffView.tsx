@@ -71,7 +71,7 @@ export function DiffView({ tab }: { tab: string }) {
         api.FileVersions(tab, versionsRequest(t)),
         t.kind === 'commit'
           ? api.CommitFileDiff(tab, t.hash, t.path, t.oldPath)
-          : api.WipDiff(tab, { path: t.path, staged: t.staged, untracked: t.untracked } as ops.WipDiffRequest),
+          : api.WipDiff(tab, { path: t.path, staged: t.staged, untracked: t.untracked, oldPath: t.oldPath ?? '' } as ops.WipDiffRequest),
       ]);
       if (n === seq.current) { setData({ v, fd }); setStale(false); }
     } catch (e) {

@@ -93,6 +93,13 @@ describe('DiffView', () => {
     expect(api.Status).toHaveBeenCalled();
   });
 
+  it('passes the old path of a staged rename to WipDiff', async () => {
+    setTarget({ kind: 'wip', path: 'new.txt', staged: true, untracked: false, oldPath: 'old.txt' });
+    mount();
+    await screen.findByTestId('editor');
+    expect(api.WipDiff).toHaveBeenCalledWith('t', { path: 'new.txt', staged: true, untracked: false, oldPath: 'old.txt' });
+  });
+
   it('stages the selected lines of one hunk; unstages in the staged view', async () => {
     setTarget({ kind: 'wip', path: 'a.txt', staged: true, untracked: false });
     mount();
