@@ -832,3 +832,23 @@ func TestShutdownLetsRunningCommitFinish(t *testing.T) {
 		t.Fatalf("commits = %s, the commit did not land", c)
 	}
 }
+
+// When the tab cannot be saved, OpenRepo fails and leaves no orphan session.
+func TestOpenRepoStoreFailureClosesSession(t *testing.T) {
+	a, _, repo := newTestApp(t)
+	repo.CommitAll("one")
+	stateDir := filepath.Dir(a.cfg.StatePath)
+	if err := os.Chmod(stateDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(stateDir, 0o700) })
+	if _, err := a.OpenRepo(repo.Dir); err == nil {
+		t.Fatal("OpenRepo succeeded although the state could not be saved")
+	}
+	a.mu.Lock()
+	n := len(a.sessions)
+	a.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d session(s) left open after the failed OpenRepo", n)
+	}
+}

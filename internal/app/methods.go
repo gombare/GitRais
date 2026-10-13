@@ -156,7 +156,17 @@ func (a *App) OpenRepo(path string) (TabInfo, error) {
 		st.ActiveTab = ti.ID
 		store.AddRecent(st, ti.Path)
 	})
-	return ti, uiErr(err)
+	if err != nil {
+		// The frontend gets no tab: do not leave its session running unseen.
+		a.mu.Lock()
+		if e, ok := a.sessions[id]; ok {
+			delete(a.sessions, id)
+			a.closeLocked(e)
+		}
+		a.mu.Unlock()
+		return TabInfo{}, uiErr(err)
+	}
+	return ti, nil
 }
 
 // PickDirectory shows the native directory picker; "" if cancelled.
