@@ -84,7 +84,7 @@ describe('AuthDialog', () => {
   it('traps Tab focus inside the dialog', () => {
     render(<AuthDialog />);
     push({ id: 'a', prompt: 'Password: ', secret: true });
-    const ok = screen.getByRole('button', { name: 'OK' });
+    const ok = screen.getByRole('button', { name: 'Invia' });
     ok.focus();
     fireEvent.keyDown(ok, { key: 'Tab' });
     expect(document.activeElement).toBe(screen.getByLabelText(/Password/));

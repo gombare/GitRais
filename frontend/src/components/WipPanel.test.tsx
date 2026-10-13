@@ -62,10 +62,10 @@ describe('WipPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Scarta a.txt' }));
     expect(api.Discard).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog').textContent).toContain('a.txt');
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scarta modifiche' }));
     await waitFor(() => expect(api.Discard).toHaveBeenCalledWith('t', ['a.txt'], []));
     fireEvent.click(screen.getByRole('button', { name: 'Scarta new.txt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina file' }));
     await waitFor(() => expect(api.Discard).toHaveBeenCalledWith('t', [], ['new.txt']));
   });
   it('discard all names the files and excludes conflicted ones; cancel does nothing', async () => {
@@ -73,11 +73,14 @@ describe('WipPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Scarta tutto' }));
     const txt = screen.getByRole('dialog').textContent!;
     expect(txt).toContain('a.txt'); expect(txt).toContain('new.txt'); expect(txt).not.toContain('c.txt');
+    // One file per line, in a list.
+    const items = Array.from(screen.getByRole('list', { name: 'Elementi interessati' }).querySelectorAll('li')).map((li) => li.textContent);
+    expect(items).toEqual(['a.txt', 'new.txt']);
     fireEvent.click(screen.getByRole('button', { name: 'Annulla' }));
     await act(async () => {});
     expect(api.Discard).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Scarta tutto' }));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scarta 2 file' }));
     await waitFor(() => expect(api.Discard).toHaveBeenCalledWith('t', ['a.txt'], ['new.txt']));
   });
   it('opens the diff for a file', () => {
@@ -100,6 +103,21 @@ describe('WipPanel', () => {
     expect(btn.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('Oggetto del commit'), { target: { value: 'x' } });
     expect(btn.disabled).toBe(false);
+  });
+  it('a disabled commit explains why, through aria-describedby', () => {
+    const hint = (btn: HTMLElement) => {
+      const id = btn.getAttribute('aria-describedby');
+      return id ? document.getElementById(id)?.textContent : null;
+    };
+    mount();
+    const btn = screen.getByRole('button', { name: /^Commit/ });
+    expect(hint(btn)).toBe('Scrivi un messaggio');
+    fireEvent.change(screen.getByLabelText('Oggetto del commit'), { target: { value: 'x' } });
+    expect(hint(btn)).toBeNull();
+    expect(screen.queryByText('Scrivi un messaggio')).toBeNull();
+    act(() => setFiles([f('a.txt', '.', 'M')]));
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(hint(btn)).toBe('Nessun file in stage');
   });
   it('shows hook stderr when the commit is rejected, and keeps the message', async () => {
     api.Commit.mockRejectedValueOnce(JSON.stringify({ kind: 'HookRejected', message: 'hook', stderr: 'lint failed: no TODO' }));
@@ -151,7 +169,7 @@ describe('WipPanel', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Scarta tutto' }));
     act(() => setFiles([f('new.txt', '?', '?', { untracked: true })]));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scarta 2 file' }));
     await waitFor(() => expect(api.Discard).toHaveBeenCalledWith('t', [], ['new.txt']));
   });
   it('refreshes the status after a successful stage', async () => {

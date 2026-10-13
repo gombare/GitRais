@@ -7,7 +7,7 @@ vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api
 
 import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
-import { CommitDetails } from './CommitDetails';
+import { COPIED_MS, CommitDetails } from './CommitDetails';
 
 const H1 = '1'.repeat(40), H2 = '2'.repeat(40), P = '9'.repeat(40);
 const detail = (hash: string, summary: string) => ({
@@ -51,6 +51,28 @@ describe('CommitDetails', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(screen.queryByText('first')).toBeNull();
     expect(screen.getByText('second')).toBeTruthy();
+  });
+  it('copying the hash shows a brief "Copiato ✓"', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    api.CommitDetail.mockResolvedValue(detail(H1, 'subject'));
+    render(<CommitDetails tab="t" hash={H1} />);
+    await screen.findByText('subject');
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: `Copia hash ${H1}` }));
+    expect(writeText).toHaveBeenCalledWith(H1);
+    await waitFor(() => expect(status.textContent).toBe('Copiato ✓'));
+    await waitFor(() => expect(status.textContent).toBe(''), { timeout: COPIED_MS + 1000 });
+  });
+  it('a failed copy becomes a toast, without the confirmation', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn(async () => { throw new Error('denied'); }) }, configurable: true });
+    api.CommitDetail.mockResolvedValue(detail(H1, 'subject'));
+    render(<CommitDetails tab="t" hash={H1} />);
+    await screen.findByText('subject');
+    fireEvent.click(screen.getByRole('button', { name: `Copia hash ${H1}` }));
+    await waitFor(() => expect(useApp.getState().toasts).toHaveLength(1));
+    expect(screen.getByRole('status').textContent).toBe('');
   });
   it('toasts on load error', async () => {
     api.CommitDetail.mockRejectedValue(JSON.stringify({ kind: 'InvalidHash', message: '', stderr: '' }));

@@ -66,7 +66,7 @@ function PromptForm({ p }: { p: AuthPrompt }) {
         </p>
         <div className="modal-actions">
           <button type="button" onClick={() => answer(false)}>Annulla</button>
-          <button type="submit" className="primary">OK</button>
+          <button type="submit" className="primary">Invia</button>
         </div>
       </form>
     </div>

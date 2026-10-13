@@ -115,13 +115,13 @@ describe('Toolbar', () => {
     expect(api.StashPush).not.toHaveBeenCalled();
     const box = screen.getByRole('checkbox', { name: /non tracciati/ }) as HTMLInputElement;
     expect(box.checked).toBe(true);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Crea stash' })); });
     await waitFor(() => expect(api.StashPush).toHaveBeenCalledWith('t', '', true));
     fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
     await screen.findByRole('dialog');
     fireEvent.change(screen.getByLabelText(/Messaggio/), { target: { value: ' wip login ' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /non tracciati/ }));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Crea stash' })); });
     await waitFor(() => expect(api.StashPush).toHaveBeenLastCalledWith('t', 'wip login', false));
   });
   it('stash: cancel does not stash', async () => {
@@ -139,7 +139,7 @@ describe('Toolbar', () => {
     fireEvent.click(b);
     fireEvent.click(b);
     expect(await screen.findAllByRole('dialog')).toHaveLength(1);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Crea stash' })); });
     fireEvent.click(b);
     expect(screen.queryByRole('dialog')).toBeNull(); // still running
     expect(api.StashPush).toHaveBeenCalledTimes(1);
@@ -163,7 +163,7 @@ describe('Toolbar', () => {
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Stash' }));
     await screen.findByRole('dialog');
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Crea stash' })); });
     await screen.findByText('Operazione in corso…');
     await act(async () => { done(); });
     expect(screen.queryByText('Operazione in corso…')).toBeNull();

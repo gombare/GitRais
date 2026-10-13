@@ -49,7 +49,7 @@ describe('LeftPanel', () => {
     menuItem('wip on main', 'Elimina');
     expect(api.StashDrop).not.toHaveBeenCalled(); // needs confirmation first
     expect(screen.getByRole('dialog').textContent).toContain('stash@{0}');
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina stash' }));
     await waitFor(() => expect(api.StashDrop).toHaveBeenCalledWith('t', 'abc123'));
   });
   it('delete branch asks for confirmation; force only after a "not fully merged" failure', async () => {
@@ -57,17 +57,17 @@ describe('LeftPanel', () => {
     mount();
     menuItem('feat/x', 'Elimina feat/x');
     expect(api.DeleteBranch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina branch' }));
     await waitFor(() => expect(api.DeleteBranch).toHaveBeenCalledWith('t', 'feat/x', false));
     await waitFor(() => expect(screen.getByRole('dialog').textContent).toContain('non è completamente unito'));
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Forza eliminazione' }));
     await waitFor(() => expect(api.DeleteBranch).toHaveBeenCalledWith('t', 'feat/x', true));
   });
   it('other delete failures toast and never force', async () => {
     api.DeleteBranch.mockRejectedValueOnce(JSON.stringify({ kind: 'Locked', message: 'locked', stderr: '' }));
     mount();
     menuItem('feat/x', 'Elimina feat/x');
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina branch' }));
     await waitFor(() => expect(useApp.getState().toasts.length).toBe(1));
     expect(api.DeleteBranch).toHaveBeenCalledTimes(1);
   });
@@ -79,7 +79,7 @@ describe('LeftPanel', () => {
   it('remote branch delete uses the branch name without the remote prefix, via runOp', async () => {
     mount();
     menuItem('origin/feat/y', /Elimina origin\/feat\/y/);
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina dal remote' }));
     await waitFor(() => expect(api.DeleteRemoteBranch).toHaveBeenCalledWith('t', 'origin', 'feat/y'));
   });
   it('tag push goes to a known remote', async () => {
@@ -105,5 +105,28 @@ describe('LeftPanel', () => {
     useRepo.setState((s) => ({ repos: { t: { ...s.repos.t, refs: { head: { branch: '', detached: true, unborn: false, hash: 'abcdef1234' }, refs: [] } as any } } }));
     mount();
     expect(screen.getByText('HEAD scollegato')).toBeTruthy();
+  });
+});
+
+describe('LeftPanel ahead/behind', () => {
+  const withCounts = (ahead: number, behind: number) => useRepo.setState((s) => ({ repos: { t: { ...s.repos.t,
+    refs: { head: { branch: 'main', detached: false, unborn: false, hash: 'h' }, refs: [ref('refs/heads/feat/x', 'feat/x', 'local', '', { ahead, behind })] } as any } } }));
+  const row = () => screen.getByText('feat/x').closest('li')!;
+  it('shows only the non-zero counts, as badges', () => {
+    withCounts(2, 0);
+    mount();
+    expect(row().querySelectorAll('.badge')).toHaveLength(1);
+    expect(screen.getByText('2 commit da inviare').closest('.badge')!.textContent).toContain('↑2');
+    expect(row().textContent).not.toContain('↓');
+  });
+  it('shows both when the branch diverged, and nothing when in sync', () => {
+    withCounts(1, 3);
+    const { unmount } = mount();
+    expect(screen.getByText('3 commit da ricevere').closest('.badge')!.textContent).toContain('↓3');
+    expect(row().querySelectorAll('.badge')).toHaveLength(2);
+    unmount();
+    withCounts(0, 0);
+    mount();
+    expect(row().querySelectorAll('.badge')).toHaveLength(0);
   });
 });

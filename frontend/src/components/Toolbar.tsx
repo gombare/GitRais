@@ -42,6 +42,7 @@ export function useRepoActions(tab: string) {
         title: 'Force push',
         message: 'Il branch remoto verrà sovrascritto con quello locale (force-with-lease: fallisce se il remote è cambiato nel frattempo). Continuare?',
         danger: true,
+        confirmLabel: 'Force push',
       });
       if (ok && !busy()) await remote('push', () => api.Push(tab, true));
     },
@@ -49,7 +50,7 @@ export function useRepoActions(tab: string) {
     // Optional message; untracked files are included unless the user unticks the box.
     stash: () => once('stash', async () => {
       const r = await askTextCheck({
-        title: 'Stash delle modifiche', label: 'Messaggio (facoltativo)', allowEmpty: true,
+        title: 'Stash delle modifiche', label: 'Messaggio (facoltativo)', allowEmpty: true, confirmLabel: 'Crea stash',
         check: { label: 'Includi i file non tracciati', initial: true },
       });
       if (r) await localWrite(tab, api.StashPush(tab, r.text, r.checked));

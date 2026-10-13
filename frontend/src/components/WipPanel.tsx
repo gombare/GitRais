@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { api, parseError } from '../api/client';
 import { useApp } from '../store/app';
 import { useRepo } from '../store/repo';
@@ -7,15 +7,16 @@ import { confirmAction } from './Dialogs';
 import { openMenu } from './ContextMenu';
 import type { status, store } from '../../wailsjs/go/models';
 
-const MAX_LISTED = 10;
+// The confirm dialog scrolls its list; the cap only keeps a huge worktree from flooding the DOM.
+const MAX_LISTED = 200;
 // Same grouping the panel renders; also used to re-read the lists after an async confirm.
 const groupFiles = (files: status.FileStatus[]) => ({
   conflicted: files.filter((f) => f.conflicted),
   unstaged: files.filter((f) => !f.conflicted && (f.workTree !== '.' || f.untracked)),
   staged: files.filter((f) => !f.conflicted && !f.untracked && f.index !== '.'),
 });
-const nameFiles = (paths: string[]) =>
-  paths.slice(0, MAX_LISTED).join('\n') + (paths.length > MAX_LISTED ? `\n… e altri ${paths.length - MAX_LISTED}` : '');
+const listFiles = (paths: string[]) =>
+  paths.length > MAX_LISTED ? [...paths.slice(0, MAX_LISTED), `… e altri ${paths.length - MAX_LISTED}`] : paths;
 
 export function WipPanel({ tab, path }: { tab: string; path: string }) {
   const st = useRepo((s) => s.repos[tab]?.status);
@@ -36,6 +37,7 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
   // Message put into the form by the amend prefill, while it is still unedited.
   const prefill = useRef<{ summary: string; body: string } | null>(null);
   const summaryRef = useRef<HTMLInputElement>(null);
+  const hintId = useId();
 
   useEffect(() => {
     const focus = () => summaryRef.current?.focus();
@@ -80,6 +82,8 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
 
   const files = st?.files ?? [];
   const { conflicted, unstaged, staged } = groupFiles(files);
+  // Reason the commit cannot run yet (the first missing piece), or '' when it can.
+  const blocked = !amend && staged.length === 0 ? 'Nessun file in stage' : !summary.trim() ? 'Scrivi un messaggio' : '';
 
   const toggleAmend = async (on: boolean) => {
     const seq = ++amendSeq.current;
@@ -146,7 +150,8 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
     const message = f.untracked
       ? `Il file non tracciato ${f.path} verrà eliminato. Operazione irreversibile.`
       : `Scartare le modifiche a ${f.path}? Operazione irreversibile.`;
-    if (!(await confirmAction({ title: f.untracked ? 'Elimina file' : 'Scarta modifiche', message, danger: true }))) return;
+    const label = f.untracked ? 'Elimina file' : 'Scarta modifiche';
+    if (!(await confirmAction({ title: label, message, danger: true, confirmLabel: label }))) return;
     // The status may have changed while the dialog was open: act only if the file is still listed as such.
     const cur = currentGroups().unstaged.find((g) => g.path === f.path && g.untracked === f.untracked);
     if (!cur) return;
@@ -155,10 +160,13 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
   const discardAll = async () => {
     const tracked = unstaged.filter((f) => !f.untracked).map((f) => f.path);
     const untracked = unstaged.filter((f) => f.untracked).map((f) => f.path);
+    const n = tracked.length + untracked.length;
     const ok = await confirmAction({
       title: 'Scarta tutte le modifiche',
-      message: `Scartare le modifiche a ${tracked.length + untracked.length} file? I file non tracciati verranno eliminati. Operazione irreversibile.\n\n${nameFiles([...tracked, ...untracked])}`,
+      message: `Scartare le modifiche a ${n} file? I file non tracciati verranno eliminati. Operazione irreversibile.`,
+      items: listFiles([...tracked, ...untracked]),
       danger: true,
+      confirmLabel: `Scarta ${n} file`,
     });
     if (!ok) return;
     // Intersect with the lists as they are now: only files that were shown in the dialog are touched.
@@ -224,7 +232,10 @@ export function WipPanel({ tab, path }: { tab: string; path: string }) {
             <pre>{hookErr}</pre>
           </div>
         )}
-        <button className="primary" data-command="commit:commit" disabled={busy || !summary.trim() || (!amend && staged.length === 0)} onClick={commit}>
+        {/* Why the button is disabled; nothing while a commit is running (the busy state says it). */}
+        {blocked && <p id={hintId} className="commit-hint">{blocked}</p>}
+        <button className="primary" data-command="commit:commit" disabled={busy || !!blocked} onClick={commit}
+          aria-describedby={blocked ? hintId : undefined}>
           {amend ? 'Amend commit' : `Commit ${staged.length} file`}
         </button>
       </div>

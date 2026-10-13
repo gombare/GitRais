@@ -9,6 +9,13 @@ import { openMenu, type MenuItem } from './ContextMenu';
 import type { gitread, graph } from '../../wailsjs/go/models';
 
 const NO_REFS: gitread.Ref[] = [];
+
+// Arrow-and-count badge; screen readers get the spelled-out text instead of the arrow.
+const badge = (kind: 'ahead' | 'behind', short: string, long: string) => (
+  <span className={`badge badge-${kind}`} title={long}>
+    <span aria-hidden="true">{short}</span><span className="sr-only">{long}</span>
+  </span>
+);
 const NO_STASHES: graph.Stash[] = [];
 
 export function LeftPanel({ tab }: { tab: string }) {
@@ -29,14 +36,14 @@ export function LeftPanel({ tab }: { tab: string }) {
   const checkout = (kind: 'local' | 'remote', name: string) => run(api.Checkout(tab, { kind, name }));
 
   const deleteBranch = async (r: gitread.Ref) => {
-    if (!(await confirmAction({ title: 'Elimina branch', message: `Eliminare il branch ${r.short}?`, danger: true }))) return;
+    if (!(await confirmAction({ title: 'Elimina branch', message: `Eliminare il branch ${r.short}?`, danger: true, confirmLabel: 'Elimina branch' }))) return;
     try {
       await useApp.getState().trackWrite(tab, api.DeleteBranch(tab, r.short, false));
     } catch (e) {
       const err = parseError(e);
       // Force only when git refused because the branch is not fully merged, and only after asking again.
       if (/not fully merged/i.test(`${err.message}\n${err.stderr}`)) {
-        if (await confirmAction({ title: 'Branch non unito', message: `${r.short} non è completamente unito. Forzare l'eliminazione?`, danger: true })) {
+        if (await confirmAction({ title: 'Branch non unito', message: `${r.short} non è completamente unito. Forzare l'eliminazione?`, danger: true, confirmLabel: 'Forza eliminazione' })) {
           await run(api.DeleteBranch(tab, r.short, true));
         }
       } else toast(e, tab);
@@ -47,11 +54,11 @@ export function LeftPanel({ tab }: { tab: string }) {
     { label: `Checkout ${r.short}`, disabled: r.isHead, onClick: () => checkout('local', r.short) },
     { label: 'Crea branch da qui…', onClick: () => createBranchAt(tab, r.name) },
     { label: 'Rinomina…', onClick: async () => {
-      const n = await askText({ title: `Rinomina ${r.short}`, label: 'Nuovo nome', initial: r.short });
+      const n = await askText({ title: `Rinomina ${r.short}`, label: 'Nuovo nome', initial: r.short, confirmLabel: 'Rinomina' });
       if (n && n !== r.short) run(api.RenameBranch(tab, r.short, n));
     } },
     { label: 'Imposta upstream…', onClick: async () => {
-      const u = await askText({ title: `Upstream di ${r.short}`, label: 'remote/branch', initial: r.upstream || `origin/${r.short}` });
+      const u = await askText({ title: `Upstream di ${r.short}`, label: 'remote/branch', initial: r.upstream || `origin/${r.short}`, confirmLabel: 'Imposta upstream' });
       if (u) run(api.SetUpstream(tab, r.short, u));
     } },
     { label: 'Crea tag qui…', onClick: () => createTagAt(tab, r.name) },
@@ -64,7 +71,7 @@ export function LeftPanel({ tab }: { tab: string }) {
     'separator',
     { label: `Elimina ${r.short} dal remote`, danger: true, onClick: async () => {
       const branch = remoteBranchName(r);
-      if (await confirmAction({ title: 'Elimina branch remoto', message: `Eliminare ${branch} da ${r.remote}?`, danger: true })) {
+      if (await confirmAction({ title: 'Elimina branch remoto', message: `Eliminare ${branch} da ${r.remote}?`, danger: true, confirmLabel: 'Elimina dal remote' })) {
         runRemote('delete-remote-branch', () => api.DeleteRemoteBranch(tab, r.remote, branch));
       }
     } },
@@ -77,7 +84,7 @@ export function LeftPanel({ tab }: { tab: string }) {
       : [{ label: 'Push (nessun remote)', disabled: true, onClick: () => undefined } as MenuItem]),
     'separator',
     { label: `Elimina ${r.short}`, danger: true, onClick: async () => {
-      if (await confirmAction({ title: 'Elimina tag', message: `Eliminare il tag ${r.short}?`, danger: true })) run(api.DeleteTag(tab, r.short));
+      if (await confirmAction({ title: 'Elimina tag', message: `Eliminare il tag ${r.short}?`, danger: true, confirmLabel: 'Elimina tag' })) run(api.DeleteTag(tab, r.short));
     } },
   ];
 
@@ -105,7 +112,8 @@ export function LeftPanel({ tab }: { tab: string }) {
   );
   const refRow = (r: gitread.Ref, menu: MenuItem[], onOpen: () => void) => row(r.name, r.short, r.hash, onOpen, menu, (
     <>
-      {(r.ahead > 0 || r.behind > 0) && <span className="muted">↑{r.ahead} ↓{r.behind}</span>}
+      {r.ahead > 0 && badge('ahead', `↑${r.ahead}`, `${r.ahead} commit da inviare`)}
+      {r.behind > 0 && badge('behind', `↓${r.behind}`, `${r.behind} commit da ricevere`)}
       {r.gone && <span className="muted">upstream eliminato</span>}
     </>
   ), r.isHead);

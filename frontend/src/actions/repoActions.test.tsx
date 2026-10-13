@@ -32,7 +32,8 @@ const pick = async (item: string | RegExp) => {
   await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: item })); });
 };
 const type = (label: string | RegExp, v: string) => fireEvent.change(screen.getByLabelText(label), { target: { value: v } });
-const ok = async () => { await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'OK' })); }); };
+// Clicks the dialog's confirm (submit) button, whatever its action label.
+const ok = async () => { await act(async () => { fireEvent.click(screen.getByRole('dialog').querySelector('button[type="submit"]')!); }); };
 
 describe('commitMenu', () => {
   it('checkout warns about detached HEAD, then checks out the commit', async () => {
@@ -92,6 +93,21 @@ describe('commitMenu', () => {
     mount(commitMenu('t', HASH));
     await pick('Copia hash');
     expect(writeText).toHaveBeenCalledWith(HASH);
+    // The menu is gone: a short success toast confirms the copy.
+    await waitFor(() => expect(useApp.getState().toasts[0]).toMatchObject({ severity: 'success', title: 'Copiato ✓', tab: 't' }));
+  });
+  it('dialogs name their action on the confirm button', async () => {
+    mount(commitMenu('t', HASH));
+    await pick('Crea branch qui…');
+    expect(screen.getByRole('button', { name: 'Crea branch' })).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Annulla' })); });
+    await pick('Checkout di questo commit');
+    expect(screen.getByRole('button', { name: 'Checkout' })).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Annulla' })); });
+    await pick('Crea tag qui…');
+    type('Nome', 'v1');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Avanti' })); });
+    expect(await screen.findByRole('button', { name: 'Crea tag' })).toBeTruthy();
   });
   it('a failing write becomes a toast and clears the busy counter', async () => {
     api.Checkout.mockRejectedValueOnce(uiErr('DirtyWorktree'));
