@@ -14,9 +14,14 @@ import 'monaco-editor/features/contextmenu/register';
 import 'monaco-editor/languages/definitions/register.all';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import { loader } from '@monaco-editor/react';
+import { gitraisTheme, MONACO_THEME } from './monacoTheme';
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 loader.config({ monaco });
+
+// Colours come from the app's CSS tokens, read once when the diff chunk loads.
+const css = getComputedStyle(document.documentElement);
+monaco.editor.defineTheme(MONACO_THEME, gitraisTheme((name) => css.getPropertyValue(name)));
 
 // Monaco language id for a file path (by extension or exact file name).
 export function languageFor(path: string): string {

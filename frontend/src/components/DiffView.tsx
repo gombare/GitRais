@@ -5,6 +5,7 @@ import { api, on, parseError } from '../api/client';
 import { useApp } from '../store/app';
 import { useRepo, type DiffTarget } from '../store/repo';
 import { languageFor } from '../monaco';
+import { MONACO_THEME } from '../monacoTheme';
 import { fingerprint, modelMatchesDiff, selectionMatchesModel, selectionToLines, splitLikeMonaco } from '../diff/selection';
 import type { diff, ops, session } from '../../wailsjs/go/models';
 
@@ -216,10 +217,10 @@ export function DiffView({ tab }: { tab: string }) {
       {v && fd && !conflicted && !binary && !tooLarge && !noChanges && (
         <div className="diff-editor">
           <MonacoDiff
-            edRef={ed} original={v.old} modified={v.new} language={languageFor(target.path)} theme="vs-dark"
+            edRef={ed} original={v.old} modified={v.new} language={languageFor(target.path)} theme={MONACO_THEME}
             options={{
               readOnly: true, originalEditable: false, renderSideBySide: !inline, useInlineViewWhenSpaceIsLimited: false,
-              minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true, renderOverviewRuler: false,
+              minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, automaticLayout: true, renderOverviewRuler: false,
             }}
           />
         </div>
