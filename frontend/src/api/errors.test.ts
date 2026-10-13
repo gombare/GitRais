@@ -27,7 +27,7 @@ describe('describeError', () => {
     expect(d.detail).toContain('lint failed');
   });
   it('describes backend sentinel kinds', () => {
-    for (const kind of ['GitMissing', 'Timeout', 'InvalidPath', 'NoTab', 'PullStrategyRequired', 'OpInProgress']) {
+    for (const kind of ['GitMissing', 'Timeout', 'InvalidPath', 'NoTab', 'PullStrategyRequired', 'OpInProgress', 'GitRunning']) {
       expect(describeError({ kind, message: 'raw', stderr: '' }).title).not.toBe('Errore');
     }
   });

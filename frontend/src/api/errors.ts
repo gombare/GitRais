@@ -13,6 +13,7 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   LockInUse: ['Lock in uso', 'Un processo sta ancora usando index.lock: attendi la fine dell’operazione.', null],
   LockTooRecent: ['Lock appena creato', 'index.lock è stato creato pochi secondi fa: un’operazione git potrebbe essere in corso. Riprova tra poco.', null],
   LsofMissing: ['Verifica non possibile', 'lsof non è disponibile: non posso verificare che index.lock non sia in uso, quindi non lo rimuovo.', null],
+  GitRunning: ['Git in esecuzione', 'Un processo git sta lavorando in questo repository: attendi che finisca, poi riprova a rimuovere index.lock.', null],
   NotARepo: ['Non è un repository', 'La cartella selezionata non contiene un repository git.', null],
   Network: ['Errore di rete', 'Impossibile raggiungere il remote.', null],
   HookRejected: ['Hook rifiutato', 'Un hook git ha bloccato l’operazione.', null],

@@ -115,7 +115,7 @@ func jsonText(s string) string {
 // RemoveIndexLock removes a stale <gitdir>/index.lock (see ops.RemoveIndexLock).
 // The path comes from the session, never from the caller.
 func (s *Session) RemoveIndexLock(ctx context.Context) error {
-	return s.write(ctx, false, func(c context.Context) error { return ops.RemoveIndexLock(c, s.GitDir) })
+	return s.write(ctx, false, func(c context.Context) error { return ops.RemoveIndexLock(c, s.GitDir, s.Dir) })
 }
 
 func (s *Session) Stage(ctx context.Context, paths []string) error {

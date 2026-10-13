@@ -48,6 +48,7 @@ var sentinelKinds = []struct {
 	{ops.ErrLockInUse, "LockInUse"},
 	{ops.ErrLockTooRecent, "LockTooRecent"},
 	{ops.ErrLsofMissing, "LsofMissing"},
+	{ops.ErrGitRunning, "GitRunning"},
 	{session.ErrClosed, "Cancelled"},
 	{context.Canceled, "Cancelled"},
 	{context.DeadlineExceeded, "Timeout"},

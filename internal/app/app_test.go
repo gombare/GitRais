@@ -254,6 +254,7 @@ func TestUIErrorKinds(t *testing.T) {
 		{ops.ErrLockInUse, "LockInUse"},
 		{ops.ErrLockTooRecent, "LockTooRecent"},
 		{ops.ErrLsofMissing, "LsofMissing"},
+		{ops.ErrGitRunning, "GitRunning"},
 		{fmt.Errorf("%w: x", ops.ErrInvalidFilePath), "InvalidFilePath"},
 		{session.ErrClosed, "Cancelled"},
 		{context.Canceled, "Cancelled"},
