@@ -79,7 +79,7 @@ func RemoveIndexLock(ctx context.Context, gitDir, worktree string) error {
 	}
 	// A git process working in the repository may own the lock without
 	// holding it open (between creating it and renaming it over the index).
-	cwds, err := runLsof(ctx, "-a", "-c", "git", "-d", "cwd", "-Fn")
+	cwds, err := runLsof(ctx, "-a", "-c", "/^git(-|$)/", "-d", "cwd", "-Fn") // exactly git and git-* (lsof -c matches prefixes: "git" would also match gitrais)
 	if err != nil {
 		return err
 	}

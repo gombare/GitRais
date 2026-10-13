@@ -165,7 +165,7 @@ export function DiffView({ tab }: { tab: string }) {
     const paths = staged && target.oldPath ? [target.oldPath, target.path] : [target.path];
     void mutate(() => (staged ? api.Unstage(tab, paths) : api.Stage(tab, paths)), () =>
       openDiff(tab, staged
-        ? { kind: 'wip', path: target.path, staged: false, untracked: fd?.status === 'A' }
+        ? { kind: 'wip', path: target.path, staged: false, untracked: fd?.status === 'A' || fd?.status === 'R' }
         : { kind: 'wip', path: target.path, staged: true, untracked: false }));
   };
 

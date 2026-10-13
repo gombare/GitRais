@@ -74,7 +74,7 @@ var (
 
 // closeGrace is how long Close lets a running local write finish before
 // cancelling it. It fits the app's 10 s shutdown budget with room for the kill.
-var closeGrace = 8 * time.Second
+var closeGrace = 4 * time.Second // + up to 5 s SIGKILL escalation stays within the app's 10 s shutdown budget
 
 // watchDebounce coalesces bursts of file events into one notification.
 const watchDebounce = 300 * time.Millisecond
