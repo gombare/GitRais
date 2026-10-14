@@ -137,6 +137,18 @@ describe('Toasts presentation', () => {
     expect(screen.queryByText('Fatto')).toBeNull();
   });
 
+  it('notices collapsed into "+N" (never rendered) still expire by age', () => {
+    vi.useFakeTimers();
+    act(() => {
+      for (let i = 1; i <= 5; i++) useApp.getState().notify({ severity: 'success', title: `n${i}`, tab: 't' });
+    });
+    render(<Toasts />);
+    expect(document.querySelectorAll('.toast')).toHaveLength(3);
+    act(() => { vi.advanceTimersByTime(5_100); });
+    expect(useApp.getState().toasts).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: /Mostra altre/ })).toBeNull();
+  });
+
   it('shows at most 3 toasts; the oldest collapse into "+N"', () => {
     act(() => {
       for (let i = 1; i <= 5; i++) useApp.getState().toast(JSON.stringify({ kind: 'Unknown', message: `e${i}`, stderr: '' }), 't');

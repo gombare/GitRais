@@ -43,6 +43,8 @@ type AppStore = {
   // Shows a non-error notice (e.g. "Copiato", "Push completato").
   notify(n: Notice): void;
   dismiss(id: number): void;
+  // Holds (hover/focus) or releases a toast's auto-dismiss; released, the countdown restarts in full.
+  holdToast(id: number, held: boolean): void;
   setOp(tab: string, op: OpState): void;
   // Applies an `op:progress` event: ignored unless the op was started through runOp on a live tab.
   progressOp(tab: string, op: NonNullable<OpState>): void;
@@ -57,6 +59,19 @@ type AppStore = {
 };
 
 let nextToast = 1;
+// Auto-dismiss timers, owned by the store so that toasts that are not rendered (collapsed
+// behind "+N", or on another tab) still expire by age.
+const toastTimers = new Map<number, ReturnType<typeof setTimeout>>();
+function armToast(t: Toast) {
+  const ms = toastTimeout(t);
+  if (!ms) return;
+  clearTimeout(toastTimers.get(t.id));
+  toastTimers.set(t.id, setTimeout(() => useApp.getState().dismiss(t.id), ms));
+}
+function disarmToast(id: number) {
+  clearTimeout(toastTimers.get(id));
+  toastTimers.delete(id);
+}
 // Running runOp calls per tab: ops[tab] is cleared only when the last one settles.
 const activeOps = new Map<string, number>();
 
@@ -119,7 +134,7 @@ export const useApp = create<AppStore>((set, get) => ({
         tabs,
         ops,
         writes,
-        toasts: s.toasts.filter((t) => t.tab !== id),
+        toasts: s.toasts.filter((t) => t.tab !== id || (disarmToast(t.id), false)),
         active: s.active === id ? (tabs.at(-1)?.id ?? null) : s.active,
       };
     });
@@ -148,7 +163,9 @@ export const useApp = create<AppStore>((set, get) => ({
     const error = parseError(e);
     if (isSilent(error)) return;
     const d = describeError(error);
-    set((s) => ({ toasts: [...s.toasts, { id: nextToast++, tab, error, ...d }] }));
+    const t: Toast = { id: nextToast++, tab, error, ...d };
+    set((s) => ({ toasts: [...s.toasts, t] }));
+    armToast(t);
   },
   notify({ severity, title, detail = '', tab, timeout }) {
     const t: Toast = {
@@ -156,9 +173,19 @@ export const useApp = create<AppStore>((set, get) => ({
       error: { kind: 'Notice', message: title, stderr: '' }, timeout,
     };
     set((s) => ({ toasts: [...s.toasts, t] }));
+    armToast(t);
   },
   dismiss(id) {
+    disarmToast(id);
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
+  holdToast(id, held) {
+    if (held) {
+      disarmToast(id);
+      return;
+    }
+    const t = get().toasts.find((x) => x.id === id);
+    if (t) armToast(t);
   },
   setOp(tab, op) {
     set((s) => ({ ops: { ...s.ops, [tab]: op } }));

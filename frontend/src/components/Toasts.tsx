@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { Severity } from '../api/errors';
-import { toastTimeout, useApp, type Toast } from '../store/app';
+import { useApp, type Toast } from '../store/app';
 import { confirmAction } from './Dialogs';
 import { pull } from '../actions/repoActions';
 
@@ -14,15 +14,17 @@ const LABELS: Record<Severity, string> = { error: 'Errore', warning: 'Attenzione
 
 function ToastItem({ t, onAction }: { t: Toast; onAction: (t: Toast, action: string) => void }) {
   const dismiss = useApp((s) => s.dismiss);
-  const ms = toastTimeout(t);
-  // The countdown restarts from scratch once neither hover nor focus holds it.
+  const holdToast = useApp((s) => s.holdToast);
+  // The store owns the countdown; hover or focus holds it, and it restarts in full afterwards.
   const [hover, setHover] = useState(false);
   const [focus, setFocus] = useState(false);
+  const held = hover || focus;
+  const first = useRef(true);
   useEffect(() => {
-    if (!ms || hover || focus) return;
-    const id = window.setTimeout(() => dismiss(t.id), ms);
-    return () => window.clearTimeout(id);
-  }, [ms, hover, focus, t.id, dismiss]);
+    if (first.current && !held) { first.current = false; return; } // armed by the store already
+    first.current = false;
+    holdToast(t.id, held);
+  }, [held, t.id, holdToast]);
   return (
     <div className={`toast toast-${t.severity}`} role={t.severity === 'error' ? 'alert' : 'status'}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}

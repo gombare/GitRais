@@ -4,16 +4,11 @@ import { useRepo } from '../store/repo';
 import { groupRefs } from '../leftpanel/groupRefs';
 import { localBranchMenu, localWrite, remoteBranchMenu, remoteNames, stashMenu, tagMenu } from '../actions/repoActions';
 import { openMenu, openMenuAt, type MenuItem } from './ContextMenu';
+import { AheadBehind } from './Badge';
 import type { gitread, graph } from '../../wailsjs/go/models';
 
 const NO_REFS: gitread.Ref[] = [];
 
-// Arrow-and-count badge; screen readers get the spelled-out text instead of the arrow.
-const badge = (kind: 'ahead' | 'behind', short: string, long: string) => (
-  <span className={`badge badge-${kind}`} title={long}>
-    <span aria-hidden="true">{short}</span><span className="sr-only">{long}</span>
-  </span>
-);
 const NO_STASHES: graph.Stash[] = [];
 
 export function LeftPanel({ tab }: { tab: string }) {
@@ -59,8 +54,7 @@ export function LeftPanel({ tab }: { tab: string }) {
   );
   const refRow = (r: gitread.Ref, menu: MenuItem[], onOpen: () => void) => row(r.name, r.short, r.hash, onOpen, menu, (
     <>
-      {r.ahead > 0 && badge('ahead', `↑${r.ahead}`, `${r.ahead} commit da inviare`)}
-      {r.behind > 0 && badge('behind', `↓${r.behind}`, `${r.behind} commit da ricevere`)}
+      <AheadBehind ahead={r.ahead} behind={r.behind} />
       {r.gone && <span className="muted">upstream eliminato</span>}
     </>
   ), r.isHead);

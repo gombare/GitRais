@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   Push: vi.fn(async (..._a: unknown[]) => undefined), CancelOp: vi.fn(async (..._a: unknown[]) => undefined),
   CreateBranch: vi.fn(async (..._a: unknown[]) => undefined), StashPush: vi.fn(async (..._a: unknown[]) => undefined),
   StashPop: vi.fn(async (..._a: unknown[]) => undefined), AutoFetchStatus: vi.fn(async (..._a: unknown[]) => undefined),
+  Checkout: vi.fn(async (..._a: unknown[]) => undefined),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
@@ -174,5 +175,58 @@ describe('Toolbar', () => {
     fireEvent.click(b);
     fireEvent.click(b);
     expect(await screen.findAllByRole('dialog')).toHaveLength(1);
+  });
+});
+
+const refsWith = (head: object, refs: object[]) => useRepo.setState((s) => ({ repos: { t: { ...s.repos.t,
+  refs: { head: { branch: 'main', detached: false, unborn: false, hash: 'abc1234def', ...head }, refs } as any } } }));
+const local = (short: string, extra = {}) =>
+  ({ name: `refs/heads/${short}`, short, kind: 'local', remote: '', hash: 'h', upstream: '', ahead: 0, behind: 0, gone: false, isHead: false, ...extra });
+
+describe('Toolbar remote feedback', () => {
+  it('fetch and push show a success notice', async () => {
+    mount();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Fetch' })); });
+    await waitFor(() => expect(useApp.getState().toasts.map((t) => t.title)).toEqual(['Fetch completato']));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Push' })); });
+    await waitFor(() => expect(useApp.getState().toasts.map((t) => t.title)).toContain('Push completato'));
+    expect(useApp.getState().toasts.every((t) => t.severity === 'success')).toBe(true);
+  });
+  it('shows the time of the last fetch next to the Fetch button', () => {
+    mount();
+    expect(screen.queryByText(/Ultimo fetch/)).toBeNull();
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: true, paused: false, reason: '', lastFetch: Math.floor(Date.now() / 1000) - 180 }));
+    expect(screen.getByText('Ultimo fetch: 3 min fa')).toBeTruthy();
+  });
+  it('ahead/behind of the current branch as badges on Push and Pull', () => {
+    refsWith({}, [local('main', { isHead: true, upstream: 'origin/main', ahead: 2, behind: 1 })]);
+    mount();
+    expect(screen.getByRole('button', { name: /^Pull/ }).textContent).toContain('↓1');
+    expect(screen.getByRole('button', { name: /^Pull/ }).textContent).toContain('1 commit da ricevere');
+    expect(screen.getByRole('button', { name: /^Push/ }).textContent).toContain('↑2');
+  });
+  it('no badges when in sync', () => {
+    refsWith({}, [local('main', { isHead: true, upstream: 'origin/main' })]);
+    mount();
+    expect(screen.getByRole('button', { name: 'Pull' }).querySelector('.badge')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Push' }).querySelector('.badge')).toBeNull();
+  });
+});
+
+describe('Toolbar current-branch selector', () => {
+  it('lists local branches and checks out the chosen one', async () => {
+    refsWith({}, [local('main', { isHead: true }), local('feat')]);
+    mount();
+    const sel = screen.getByRole('button', { name: 'Branch corrente: main' });
+    expect(sel.getAttribute('aria-haspopup')).toBe('menu');
+    fireEvent.click(sel);
+    expect(screen.getByRole('menuitem', { name: /main/ }).getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: 'feat' })); });
+    expect(api.Checkout).toHaveBeenCalledWith('t', { kind: 'local', name: 'feat' });
+  });
+  it('shows a detached HEAD', () => {
+    refsWith({ branch: '', detached: true }, [local('main')]);
+    mount();
+    expect(screen.getByRole('button', { name: /Branch corrente: HEAD staccata abc1234/ })).toBeTruthy();
   });
 });

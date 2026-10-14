@@ -192,3 +192,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .af-panel .modal-check { flex-direction: row; align-items: center; gap: 6px; }
 .af-panel p { margin: 0; font-size: var(--font-size-small); }
 .af-button { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-branch { display: inline-flex; gap: 4px; align-items: center; max-width: 240px; font-weight: 600; }
+.tb-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-branch-name.detached { color: var(--warn); }
+.tb-last { font-size: var(--font-size-small); white-space: nowrap; }
+.toolbar button .badge { margin-left: 6px; }
