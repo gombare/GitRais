@@ -64,7 +64,8 @@ describe('GraphView context menu', () => {
     const list = screen.getByRole('listbox', { name: 'Storia dei commit' });
     list.focus();
     fireEvent.keyDown(list, { key: 'F10', shiftKey: true });
-    const item = screen.getByRole('menuitem', { name: 'Checkout di questo commit' });
+    // The first item gets the focus.
+    const item = screen.getByRole('menuitem', { name: 'Mostra modifiche' });
     expect(document.activeElement).toBe(item);
     fireEvent.keyDown(item, { key: 'Escape' });
     expect(screen.queryByRole('menu')).toBeNull();

@@ -70,7 +70,8 @@ describe('Toasts removeLock', () => {
     expect(useApp.getState().toasts).toHaveLength(0);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Merge' })); });
     await waitFor(() => expect(api.Pull).toHaveBeenLastCalledWith('t', 'merge'));
-    expect(useApp.getState().toasts).toHaveLength(0);
+    // Only the success notice: no error.
+    await waitFor(() => expect(useApp.getState().toasts.map((t) => t.title)).toEqual(['Pull completato']));
   });
 });
 

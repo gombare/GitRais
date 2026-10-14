@@ -1,13 +1,23 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { useApp } from '../store/app';
-import type { session, store } from '../../wailsjs/go/models';
+import { useRepo } from '../store/repo';
+import type { store } from '../../wailsjs/go/models';
 
+// Bounds of store.Settings.autoFetchSeconds (store.MinAutoFetchSeconds / MaxAutoFetchSeconds).
 const MIN_SECONDS = 30;
+const MAX_SECONDS = 3600;
 
-const reasons: Record<string, string> = {
-  auth: 'autenticazione fallita',
-  network: 'remote non raggiungibile',
+// Why the auto-fetch is not running (AutoFetchStatus.reason).
+export const AUTOFETCH_REASONS: Record<string, string> = {
+  auth: 'in pausa: credenziali',
+  network: 'in pausa: rete',
+  'waiting-manual': 'si attiva dopo il primo fetch manuale',
+};
+const explanations: Record<string, string> = {
+  auth: 'Il remote ha rifiutato le credenziali: esegui un Fetch manuale per riprenderlo.',
+  network: 'Il remote non era raggiungibile: esegui un Fetch manuale per riprenderlo.',
+  'waiting-manual': 'Parte dopo il primo Fetch, Pull o Push manuale riuscito in questo repository, così eventuali richieste di credenziali arrivano solo quando le chiedi tu.',
 };
 
 // Toolbar control for the periodic background fetch: an on/off switch and the interval
@@ -18,7 +28,8 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
   const op = useApp((s) => !!s.ops[tab]);
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<store.Settings | null>(null);
-  const [status, setStatus] = useState<session.AutoFetchStatus | null>(null);
+  const status = useRepo((s) => s.repos[tab]?.autoFetch);
+  const setAutoFetch = useRepo((s) => s.setAutoFetch);
   const [seconds, setSeconds] = useState('');
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -26,9 +37,10 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
 
   useEffect(() => {
     let live = true;
-    api.AutoFetchStatus(tab).then((s) => { if (live) setStatus(s); }, () => { /* tab closing: ignore */ });
+    // The events keep it live; this read covers the state from before the tab listened.
+    api.AutoFetchStatus(tab).then((s) => { if (live && s) setAutoFetch(tab, s); }, () => { /* tab closing: ignore */ });
     return () => { live = false; };
-  }, [tab, op, open]);
+  }, [tab, op, open, setAutoFetch]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,14 +62,14 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
       const saved = await api.SetSettings(next);
       setSettings(saved);
       setSeconds(String(saved.autoFetchSeconds));
-      setStatus(await api.AutoFetchStatus(tab));
+      setAutoFetch(tab, await api.AutoFetchStatus(tab));
     } catch (e) {
       toast(e, tab);
     }
   };
   const commitSeconds = () => {
     if (!settings) return;
-    const n = Math.max(MIN_SECONDS, Math.round(Number(seconds)) || settings.autoFetchSeconds);
+    const n = Math.min(MAX_SECONDS, Math.max(MIN_SECONDS, Math.round(Number(seconds)) || settings.autoFetchSeconds));
     if (n === settings.autoFetchSeconds) {
       setSeconds(String(n));
       return;
@@ -70,11 +82,13 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
   };
 
   const paused = !!status?.enabled && !!status.paused;
+  const reason = paused ? (AUTOFETCH_REASONS[status!.reason] ?? 'in pausa') : '';
+  const label = status && !status.enabled ? 'Fetch automatico (disattivato)' : reason ? `Fetch automatico (${reason})` : 'Fetch automatico';
   return (
     <span className="af">
       <button ref={button} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
-        onClick={() => setOpen((o) => !o)} title="Fetch periodico in background dei remote">
-        {paused ? 'Fetch automatico (in pausa)' : 'Fetch automatico'}
+        className="af-button" onClick={() => setOpen((o) => !o)} title={reason ? `${label}. ${explanations[status!.reason] ?? ''}` : 'Fetch periodico in background dei remote'}>
+        {label}
       </button>
       {open && (
         <div ref={panel} id={id} className="af-panel" role="dialog" aria-label="Fetch automatico"
@@ -87,8 +101,8 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
                 Fetch automatico
               </label>
               <label>
-                Intervallo (secondi, minimo {MIN_SECONDS})
-                <input type="number" min={MIN_SECONDS} step={1} value={seconds} disabled={!settings.autoFetch}
+                Intervallo (secondi, da {MIN_SECONDS} a {MAX_SECONDS})
+                <input type="number" min={MIN_SECONDS} max={MAX_SECONDS} step={1} value={seconds} disabled={!settings.autoFetch}
                   onChange={(e) => setSeconds(e.target.value)} onBlur={commitSeconds}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitSeconds(); } }} />
               </label>
@@ -97,7 +111,7 @@ export function AutoFetchSettings({ tab }: { tab: string }) {
           ) : <p className="muted">Caricamento…</p>}
           {paused && (
             <p role="status">
-              In pausa per questo repository ({reasons[status!.reason] ?? 'errore'}): esegui un Fetch manuale per riprenderlo.
+              Per questo repository: {reason}. {explanations[status!.reason] ?? 'Esegui un Fetch manuale per riprenderlo.'}
             </p>
           )}
         </div>

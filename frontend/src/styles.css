@@ -191,3 +191,4 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .af-panel label { display: flex; flex-direction: column; gap: 4px; }
 .af-panel .modal-check { flex-direction: row; align-items: center; gap: 6px; }
 .af-panel p { margin: 0; font-size: var(--font-size-small); }
+.af-button { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

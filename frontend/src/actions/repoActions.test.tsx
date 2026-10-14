@@ -7,11 +7,13 @@ const api = vi.hoisted(() => ({
   CreateTag: vi.fn(async (..._a: unknown[]) => undefined), StashApply: vi.fn(async (..._a: unknown[]) => undefined),
   StashPop: vi.fn(async (..._a: unknown[]) => undefined), StashDrop: vi.fn(async (..._a: unknown[]) => undefined),
   Pull: vi.fn(async (..._a: unknown[]) => undefined), PullAutostash: vi.fn(async (..._a: unknown[]) => undefined),
+  CommitDetail: vi.fn(async (..._a: unknown[]) => undefined as unknown), RevealInFinder: vi.fn(async (..._a: unknown[]) => undefined),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
 import { useApp } from '../store/app';
-import { commitMenu, localWrite, pull, stashMenu } from './repoActions';
+import { commitMenu, fileItems, localWrite, pull, splitUpstream, stashMenu } from './repoActions';
+import { useRepo } from '../store/repo';
 import { ContextMenuHost, openMenu, type MenuItem } from '../components/ContextMenu';
 import { DialogHost } from '../components/Dialogs';
 
@@ -34,6 +36,56 @@ const pick = async (item: string | RegExp) => {
 const type = (label: string | RegExp, v: string) => fireEvent.change(screen.getByLabelText(label), { target: { value: v } });
 // Clicks the dialog's confirm (submit) button, whatever its action label.
 const ok = async () => { await act(async () => { fireEvent.click(screen.getByRole('dialog').querySelector('button[type="submit"]')!); }); };
+
+describe('commitMenu extras', () => {
+  const clip = () => {
+    const writeText = vi.fn(async (_t: string) => undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    return writeText;
+  };
+  it('copies the short hash and the full message', async () => {
+    const writeText = clip();
+    api.CommitDetail.mockResolvedValueOnce({ summary: 'Sum', body: 'Body line' });
+    mount(commitMenu('t', HASH, 'Sum'));
+    await pick('Copia hash breve');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(HASH.slice(0, 7)));
+    await pick('Copia messaggio');
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('Sum\n\nBody line'));
+    expect(api.CommitDetail).toHaveBeenCalledWith('t', HASH);
+  });
+  it('copy message falls back to the subject when the detail cannot be read', async () => {
+    const writeText = clip();
+    api.CommitDetail.mockRejectedValueOnce(new Error('x'));
+    mount(commitMenu('t', HASH, 'Only subject'));
+    await pick('Copia messaggio');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('Only subject'));
+  });
+  it('"Mostra modifiche" selects the commit', async () => {
+    useRepo.setState({ repos: { t: { stashes: [], graphRows: 0, graphDone: true, graphVersion: 0, selection: { kind: 'wip' }, diff: null } } });
+    mount(commitMenu('t', HASH));
+    await pick('Mostra modifiche');
+    expect(useRepo.getState().repos.t.selection).toEqual({ kind: 'commit', hash: HASH });
+  });
+  it('stash: copy message', async () => {
+    const writeText = clip();
+    mount(stashMenu('t', { Hash: 'h', Ref: 'stash@{0}', Subject: 'On main: wip' }));
+    await pick('Copia messaggio');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('On main: wip'));
+  });
+  it('file items: copy path and reveal in Finder', async () => {
+    const writeText = clip();
+    mount(fileItems('t', 'dir/a.txt'));
+    await pick('Copia percorso');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('dir/a.txt'));
+    await pick('Mostra nel Finder');
+    expect(api.RevealInFinder).toHaveBeenCalledWith('t', 'dir/a.txt');
+  });
+  it('splitUpstream matches the longest known remote', () => {
+    expect(splitUpstream('origin/feat/x', ['origin'])).toEqual({ remote: 'origin', branch: 'feat/x' });
+    expect(splitUpstream('team/a/main', ['team', 'team/a'])).toEqual({ remote: 'team/a', branch: 'main' });
+    expect(splitUpstream('other/main', ['origin'])).toBeNull();
+  });
+});
 
 describe('commitMenu', () => {
   it('checkout warns about detached HEAD, then checks out the commit', async () => {
@@ -171,7 +223,7 @@ describe('pull', () => {
     release();
     await p;
     expect(useApp.getState().ops.t).toBeFalsy();
-    expect(useApp.getState().toasts).toHaveLength(0);
+    expect(useApp.getState().toasts.map((t) => [t.severity, t.title])).toEqual([['success', 'Pull completato']]);
   });
   it('DirtyWorktree: cancelling the choice does nothing more', async () => {
     api.Pull.mockRejectedValueOnce(uiErr('DirtyWorktree'));
@@ -183,6 +235,19 @@ describe('pull', () => {
     await p;
     expect(api.PullAutostash).not.toHaveBeenCalled();
     expect(useApp.getState().toasts).toHaveLength(0);
+  });
+  it('UntrackedWouldBeOverwritten never offers autostash: it is a toast', async () => {
+    api.Pull.mockRejectedValueOnce(uiErr('UntrackedWouldBeOverwritten'));
+    render(<DialogHost />);
+    await act(async () => { await pull('t'); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(api.PullAutostash).not.toHaveBeenCalled();
+    expect(useApp.getState().toasts.map((t) => t.error.kind)).toEqual(['UntrackedWouldBeOverwritten']);
+  });
+  it('a successful pull shows a success notice that goes away by itself', async () => {
+    await act(async () => { await pull('t'); });
+    const [t] = useApp.getState().toasts;
+    expect([t.severity, t.title]).toEqual(['success', 'Pull completato']);
   });
   it('an autostash conflict becomes a toast', async () => {
     api.Pull.mockRejectedValueOnce(uiErr('DirtyWorktree'));

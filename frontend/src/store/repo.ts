@@ -9,7 +9,12 @@ export type DiffTarget =
   | { kind: 'wip'; path: string; staged: boolean; untracked: boolean; oldPath?: string }
   | { kind: 'commit'; hash: string; path: string; oldPath: string };
 
+// Auto-fetch state of a tab: from AutoFetchStatus and the `autofetch:status` events (which carry
+// no interval). lastFetch: unix seconds of the last successful fetch, 0 = none yet.
+export type AutoFetchInfo = { enabled: boolean; paused: boolean; reason: string; lastFetch: number; intervalSeconds?: number };
+
 export type RepoState = {
+  autoFetch?: AutoFetchInfo;
   refs?: gitread.Refs;
   status?: status.Status;
   stashes: graph.Stash[];
@@ -37,6 +42,8 @@ type RepoStore = {
   graphReset(tab: string): void;
   select(tab: string, sel: Selection): void;
   openDiff(tab: string, d: DiffTarget | null): void;
+  // Merges an auto-fetch status (AutoFetchStatus result or autofetch:status event).
+  setAutoFetch(tab: string, a: AutoFetchInfo): void;
   // Selects the commit and asks the graph to scroll to it (selection only, no scroll, if the commit is not in the graph).
   jump(tab: string, hash: string): Promise<void>;
 };
@@ -101,6 +108,11 @@ export const useRepo = create<RepoStore>((set, get) => ({
   },
   openDiff(tab, diff) {
     get().patch(tab, { diff });
+  },
+  setAutoFetch(tab, a) {
+    const prev = get().get(tab).autoFetch;
+    get().patch(tab, { autoFetch: { ...prev, enabled: a.enabled, paused: a.paused, reason: a.reason, lastFetch: a.lastFetch ?? prev?.lastFetch ?? 0,
+      ...(a.intervalSeconds !== undefined ? { intervalSeconds: a.intervalSeconds } : {}) } });
   },
   async jump(tab, hash) {
     let row = -1;

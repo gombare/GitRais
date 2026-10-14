@@ -7,6 +7,8 @@ const api = vi.hoisted(() => ({
   DeleteBranch: vi.fn(async (..._a: unknown[]) => undefined), Checkout: vi.fn(async () => undefined),
   DeleteRemoteBranch: vi.fn(async () => undefined), PushTag: vi.fn(async () => undefined),
   FindRow: vi.fn(async (..._a: unknown[]) => 7),
+  Pull: vi.fn(async (..._a: unknown[]) => undefined), Push: vi.fn(async (..._a: unknown[]) => undefined),
+  CreateBranch: vi.fn(async (..._a: unknown[]) => undefined), DeleteTag: vi.fn(async (..._a: unknown[]) => undefined),
 }));
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
@@ -25,7 +27,8 @@ beforeEach(() => {
   useRepo.setState({ repos: { t: {
     stashes: [{ Hash: 'abc123', Ref: 'stash@{0}', Subject: 'wip on main' }] as any,
     refs: { head: { branch: 'main', detached: false, unborn: false, hash: 'h' }, refs: [
-      ref('refs/heads/main', 'main', 'local', '', { isHead: true }), ref('refs/heads/feat/x', 'feat/x', 'local'),
+      ref('refs/heads/main', 'main', 'local', '', { isHead: true, upstream: 'origin/main' }),
+      ref('refs/heads/feat/x', 'feat/x', 'local', '', { upstream: 'origin/feat/x' }),
       ref('refs/remotes/origin/feat/y', 'origin/feat/y', 'remote', 'origin'), ref('refs/tags/v1', 'v1', 'tag'),
     ] } as any,
     graphRows: 0, graphDone: true, graphVersion: 0, selection: { kind: 'wip' }, diff: null,
@@ -105,6 +108,77 @@ describe('LeftPanel', () => {
     useRepo.setState((s) => ({ repos: { t: { ...s.repos.t, refs: { head: { branch: '', detached: true, unborn: false, hash: 'abcdef1234' }, refs: [] } as any } } }));
     mount();
     expect(screen.getByText('HEAD scollegato')).toBeTruthy();
+  });
+});
+
+const labels = () => screen.getAllByRole('menuitem').map((m) => m.textContent);
+const separators = () => screen.getByRole('menu').querySelectorAll('[role="separator"]').length;
+
+describe('LeftPanel rich menus', () => {
+  it('current branch: checkout disabled with a reason, pull and push, no delete', async () => {
+    mount();
+    fireEvent.contextMenu(screen.getByText('main'));
+    expect(labels()).toEqual(['Checkout main', 'Pull', 'Push', 'Imposta upstream…', 'Crea branch da qui…', 'Crea tag qui…',
+      'Rinomina…', 'Copia nome del branch', 'Elimina main', 'Elimina main anche su origin…']);
+    expect(separators()).toBeGreaterThanOrEqual(4);
+    const co = screen.getByRole('menuitem', { name: 'Checkout main' });
+    expect(co.getAttribute('aria-disabled')).toBe('true');
+    expect(co.getAttribute('title')).toMatch(/corrente/);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Push' }));
+    await waitFor(() => expect(api.Push).toHaveBeenCalledWith('t', false));
+    await waitFor(() => expect(useApp.getState().toasts.map((t) => t.title)).toEqual(['Push completato']));
+  });
+  it('another branch: no pull/push (the backend pushes the current branch only)', () => {
+    mount();
+    fireEvent.contextMenu(screen.getByText('feat/x'));
+    expect(labels()).not.toContain('Pull');
+    expect(labels()).not.toContain('Push');
+  });
+  it('delete also on origin names both, deletes local then remote', async () => {
+    mount();
+    menuItem('feat/x', 'Elimina feat/x anche su origin…');
+    const dlg = screen.getByRole('dialog').textContent!;
+    expect(dlg).toContain('feat/x');
+    expect(dlg).toContain('origin');
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina entrambi' }));
+    await waitFor(() => expect(api.DeleteRemoteBranch).toHaveBeenCalledWith('t', 'origin', 'feat/x'));
+    expect(api.DeleteBranch).toHaveBeenCalledWith('t', 'feat/x', false);
+  });
+  it('delete also on origin: a failed local delete leaves the remote alone', async () => {
+    api.DeleteBranch.mockRejectedValueOnce(JSON.stringify({ kind: 'Locked', message: 'locked', stderr: '' }));
+    mount();
+    menuItem('feat/x', 'Elimina feat/x anche su origin…');
+    fireEvent.click(screen.getByRole('button', { name: 'Elimina entrambi' }));
+    await waitFor(() => expect(useApp.getState().toasts.length).toBe(1));
+    expect(api.DeleteRemoteBranch).not.toHaveBeenCalled();
+  });
+  it('copy branch name', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mount();
+    menuItem('feat/x', 'Copia nome del branch');
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('feat/x'));
+  });
+  it('remote branch: create a local branch from it, named like it', async () => {
+    mount();
+    menuItem('origin/feat/y', 'Crea branch locale da qui…');
+    expect((screen.getByLabelText('Nome') as HTMLInputElement).value).toBe('feat/y');
+    fireEvent.submit(screen.getByRole('dialog'));
+    await waitFor(() => expect(api.CreateBranch).toHaveBeenCalledWith('t', 'feat/y', 'refs/remotes/origin/feat/y', true));
+  });
+  it('tag: detached checkout after confirmation; local delete only', async () => {
+    mount();
+    fireEvent.contextMenu(screen.getByText('v1'));
+    expect(labels()).toEqual(['Checkout v1…', 'Push su origin', 'Copia nome del tag', 'Elimina v1']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Checkout v1…' }));
+    expect(api.Checkout).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Checkout' }));
+    await waitFor(() => expect(api.Checkout).toHaveBeenCalledWith('t', { kind: 'commit', name: 'hv1' }));
+  });
+  it('the menu key opens a row menu from the keyboard', () => {
+    mount();
+    fireEvent.keyDown(screen.getByText('feat/x').closest('li')!, { key: 'F10', shiftKey: true });
+    expect(screen.getByRole('menu')).toBeTruthy();
   });
 });
 

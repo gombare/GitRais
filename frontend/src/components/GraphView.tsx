@@ -28,7 +28,7 @@ function refsByHash(refs?: gitread.Refs): Map<string, gitread.Ref[]> {
 // Stash rows get the same actions as the left panel's stash list; commits get checkout/branch/tag/copy.
 const rowMenu = (tab: string, r: app.RowDTO): MenuItem[] => r.kind === 'stash'
   ? stashMenu(tab, { Hash: r.hash, Ref: r.stashRef, Subject: r.subject })
-  : commitMenu(tab, r.hash);
+  : commitMenu(tab, r.hash, r.subject);
 
 export function GraphView({ tab, handleRef }: { tab: string; handleRef?: Ref<GraphHandle> }) {
   const total = useRepo((s) => s.repos[tab]?.graphRows ?? 0);

@@ -18,6 +18,8 @@ const severities: Record<string, Severity> = {
   LsofMissing: 'warning',
   StateCorrupt: 'warning',
   DiffChanged: 'warning',
+  // The switch happened; only the fast-forward did not.
+  SwitchedNotUpdated: 'warning',
 };
 
 const texts: Record<string, [string, string, ErrorAction]> = {
@@ -25,6 +27,8 @@ const texts: Record<string, [string, string, ErrorAction]> = {
   NonFastForward: ['Push rifiutato', 'Il remote contiene commit che non hai in locale. Esegui Pull e riprova.', 'pull'],
   Conflict: ['Conflitti', "L'operazione ha prodotto conflitti da risolvere.", null],
   DirtyWorktree: ['Modifiche locali', 'Le modifiche locali verrebbero sovrascritte: fai commit o stash.', null],
+  UntrackedWouldBeOverwritten: ['File non tracciati in mezzo', 'Alcuni file non tracciati verrebbero sovrascritti: spostali o eliminali e riprova.', null],
+  SwitchedNotUpdated: ['Branch non aggiornato', 'Sei passato al branch, ma non è stato possibile aggiornarlo (fast-forward): ci sono modifiche che lo impediscono.', null],
   Locked: ['Repository bloccato', 'Un altro processo git sta usando il repository (index.lock).', 'removeLock'],
   ClipboardUnavailable: ['Appunti non disponibili', 'Impossibile copiare negli appunti.', null],
   // Informational: shown after a successful lock removal.

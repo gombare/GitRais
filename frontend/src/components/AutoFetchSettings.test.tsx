@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../api/client', async (orig) => ({ ...(await orig<typeof import('../api/client')>()), api }));
 
 import { useApp } from '../store/app';
+import { useRepo } from '../store/repo';
 import { AutoFetchSettings } from './AutoFetchSettings';
 
 beforeEach(() => {
@@ -17,6 +18,7 @@ beforeEach(() => {
   api.SetSettings.mockReset().mockImplementation(async (s: unknown) => s);
   api.AutoFetchStatus.mockReset().mockResolvedValue({ enabled: true, intervalSeconds: 60, paused: false, reason: '' });
   useApp.setState({ tabs: [{ id: 't', path: '/r', name: 'r' }], active: 't', toasts: [], ops: {}, writes: {} });
+  useRepo.setState({ repos: { t: { stashes: [], graphRows: 0, graphDone: true, graphVersion: 0, selection: { kind: 'wip' }, diff: null } } });
 });
 afterEach(cleanup);
 
@@ -49,8 +51,31 @@ describe('AutoFetchSettings', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /in pausa/ })).toBeTruthy());
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Fetch automatico/ })); });
     const dlg = await screen.findByRole('dialog');
-    expect(dlg.textContent).toMatch(/autenticazione/);
+    expect(dlg.textContent).toMatch(/credenziali/);
     expect(dlg.textContent).toMatch(/Fetch manuale/);
+  });
+  it('caps the interval at 3600 seconds', async () => {
+    await openPanel();
+    const input = screen.getByLabelText(/Intervallo/) as HTMLInputElement;
+    expect(input.max).toBe('3600');
+    fireEvent.change(input, { target: { value: '99999' } });
+    await act(async () => { fireEvent.blur(input); });
+    expect(api.SetSettings).toHaveBeenLastCalledWith({ autoFetch: true, autoFetchSeconds: 3600 });
+  });
+  it('follows autofetch:status live (via the repo store), with a label per reason', async () => {
+    render(<AutoFetchSettings tab="t" />);
+    const btn = () => screen.getByRole('button', { name: /Fetch automatico/ });
+    await waitFor(() => expect(api.AutoFetchStatus).toHaveBeenCalled());
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: true, paused: true, reason: 'waiting-manual', lastFetch: 0 }));
+    expect(btn().textContent).toMatch(/si attiva dopo il primo fetch manuale/);
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: true, paused: true, reason: 'auth', lastFetch: 0 }));
+    expect(btn().textContent).toMatch(/in pausa: credenziali/);
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: true, paused: true, reason: 'network', lastFetch: 0 }));
+    expect(btn().textContent).toMatch(/in pausa: rete/);
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: true, paused: false, reason: '', lastFetch: 5 }));
+    expect(btn().textContent).toBe('Fetch automatico');
+    act(() => useRepo.getState().setAutoFetch('t', { enabled: false, paused: true, reason: 'auth', lastFetch: 5 }));
+    expect(btn().textContent).toBe('Fetch automatico (disattivato)');
   });
   it('Escape closes the panel and returns focus to the button', async () => {
     const dlg = await openPanel();

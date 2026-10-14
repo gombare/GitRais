@@ -52,3 +52,24 @@ describe('isSilent', () => {
     expect(isSilent({ kind: 'Timeout', message: '', stderr: '' })).toBe(false);
   });
 });
+
+// Every kind the backend can return has an Italian text (Cancelled is never shown; Unknown
+// carries the raw message). The kinds are read from the Go sources, so a new one fails here.
+import { readFileSync } from 'node:fs';
+describe('backend kinds', () => {
+  const go = (p: string) => readFileSync(new URL(`../../../internal/${p}`, import.meta.url), 'utf8');
+  const kinds = new Set<string>();
+  for (const m of go('app/errors.go').matchAll(/\{[\w.]+, "(\w+)"\}/g)) kinds.add(m[1]);
+  for (const m of go('gitexec/errors.go').matchAll(/Kind\w*\s+Kind = "(\w+)"/g)) kinds.add(m[1]);
+  it('finds the kinds in the Go sources', () => {
+    expect(kinds.has('SwitchedNotUpdated')).toBe(true);
+    expect(kinds.has('UntrackedWouldBeOverwritten')).toBe(true);
+    expect(kinds.size).toBeGreaterThan(30);
+  });
+  it.each([...kinds].filter((k) => k !== 'Cancelled' && k !== 'Unknown'))('%s has an Italian text', (kind) => {
+    expect(describeError({ kind, message: 'raw', stderr: '' }).title).not.toBe('Errore');
+  });
+  it('untracked files in the way never propose an action', () => {
+    expect(describeError({ kind: 'UntrackedWouldBeOverwritten', message: '', stderr: '' }).action).toBeNull();
+  });
+});

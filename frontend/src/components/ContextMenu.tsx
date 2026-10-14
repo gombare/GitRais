@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 
-export type MenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean } | 'separator';
+// title: a tooltip, e.g. why an item is disabled.
+export type MenuItem = { label: string; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string } | 'separator';
 
 type MenuState = { x: number; y: number; items: MenuItem[] | null; opener: HTMLElement | null };
 const useMenu = create<MenuState>(() => ({ x: 0, y: 0, items: null, opener: null }));
@@ -25,6 +26,17 @@ export function openMenuAt(anchor: HTMLElement, items: MenuItem[]) {
   const r = anchor.getBoundingClientRect();
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   useMenu.setState({ x: r.left + 8, y: r.bottom, items, opener });
+}
+
+// Drops leading, trailing and repeated separators, so menus can build optional groups freely.
+export function tidy(items: MenuItem[]): MenuItem[] {
+  const out: MenuItem[] = [];
+  for (const it of items) {
+    if (it === 'separator' && (out.length === 0 || out.at(-1) === 'separator')) continue;
+    out.push(it);
+  }
+  if (out.at(-1) === 'separator') out.pop();
+  return out;
 }
 
 function closeMenu(restoreFocus: boolean) {
@@ -58,6 +70,7 @@ export function ContextMenuHost() {
   }, [items, x, y]);
 
   if (!items) return null;
+  const shown = tidy(items);
 
   const enabled = () => Array.from(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
   const move = (delta: number) => {
@@ -90,10 +103,10 @@ export function ContextMenuHost() {
   return (
     <ul ref={ref} role="menu" className="ctx-menu" style={{ left: pos.left, top: pos.top }}
       onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKeyDown}>
-      {items.map((it, i) => it === 'separator'
+      {shown.map((it, i) => it === 'separator'
         ? <li key={i} role="separator" className="ctx-sep" />
         : (
-          <li key={i} role="menuitem" tabIndex={-1} aria-disabled={it.disabled || undefined}
+          <li key={i} role="menuitem" tabIndex={-1} aria-disabled={it.disabled || undefined} title={it.title}
             className={`${it.danger ? 'danger' : ''} ${it.disabled ? 'disabled' : ''}`}
             onClick={() => activate(it)}>
             {it.label}

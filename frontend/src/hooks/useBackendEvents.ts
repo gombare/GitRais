@@ -8,6 +8,7 @@ type GraphProgress = { tab: string; rows: number; done: boolean; error?: string 
 // gitexec.Progress is embedded; its JSON tags are promoted (phase, percent, current, total).
 type OpProgress = { tab: string; op: string; phase: string; percent: number; current: number; total: number };
 type AuthCancel = { id: string };
+type AutoFetchEvent = { tab: string; enabled: boolean; paused: boolean; reason: string; lastFetch: number };
 
 export function useBackendEvents() {
   useEffect(() => {
@@ -21,6 +22,7 @@ export function useBackendEvents() {
       }),
       on<OpProgress>('op:progress', (e) =>
         useApp.getState().progressOp(e.tab, { op: e.op, phase: e.phase ?? '', percent: e.percent ?? 0 })),
+      on<AutoFetchEvent>('autofetch:status', ({ tab, ...a }) => useRepo.getState().setAutoFetch(tab, a)),
       on<AuthPrompt>('auth:prompt', (p) => useApp.getState().pushAuth(p)),
       on<AuthCancel>('auth:cancel', (c) => useApp.getState().cancelAuth(c.id)),
     ];
