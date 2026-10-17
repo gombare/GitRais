@@ -62,9 +62,13 @@ var redirectEnv = []string{
 // GIT_CONFIG_COUNT with its GIT_CONFIG_KEY_<n>/GIT_CONFIG_VALUE_<n> pairs).
 var configEnv = []string{"GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"}
 
-// inheritedEnv returns os.Environ() without the redirectEnv and configEnv variables, so a parent
-// shell or hook can neither make commands operate on a repository other than Cmd.Dir nor inject
-// configuration (core.fsmonitor, core.sshCommand, ...) into them.
+// promptEnv lists the variables that route credential prompts to another program's helper
+// (for example an editor's GIT_ASKPASS when started from its terminal).
+var promptEnv = []string{"GIT_ASKPASS", "SSH_ASKPASS", "SSH_ASKPASS_REQUIRE"}
+
+// inheritedEnv returns os.Environ() without the redirectEnv, configEnv and promptEnv variables,
+// so a parent shell or hook can neither make commands operate on a repository other than Cmd.Dir,
+// nor inject configuration (core.fsmonitor, core.sshCommand, ...), nor answer credential prompts.
 func inheritedEnv() []string {
 	var out []string
 envLoop:
@@ -73,7 +77,7 @@ envLoop:
 		if strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
 			continue
 		}
-		for _, drop := range [][]string{redirectEnv, configEnv} {
+		for _, drop := range [][]string{redirectEnv, configEnv, promptEnv} {
 			for _, d := range drop {
 				if k == d {
 					continue envLoop

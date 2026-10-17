@@ -24,3 +24,17 @@ func TestInheritedEnvDropsConfigInjection(t *testing.T) {
 		t.Error("unrelated variable dropped")
 	}
 }
+
+// A parent's credential prompt (an editor's GIT_ASKPASS, say) is dropped: git must
+// prompt only through the helper the session sets, or not at all.
+func TestInheritedEnvDropsPromptHelpers(t *testing.T) {
+	t.Setenv("GIT_ASKPASS", "/editor/askpass.sh")
+	t.Setenv("SSH_ASKPASS", "/editor/askpass.sh")
+	t.Setenv("SSH_ASKPASS_REQUIRE", "force")
+	env := strings.Join(inheritedEnv(), "\n") + "\n"
+	for _, k := range []string{"GIT_ASKPASS=", "SSH_ASKPASS=", "SSH_ASKPASS_REQUIRE="} {
+		if strings.Contains("\n"+env, "\n"+k) {
+			t.Errorf("%s inherited", k)
+		}
+	}
+}
