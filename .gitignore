@@ -9,3 +9,4 @@ frontend/playwright-report/
 .DS_Store
 .superpowers/
 CLAUDE.md
+docs/
