@@ -110,12 +110,6 @@ at it.
 - `frontend/`: React + TypeScript UI (Vite, Zustand, Monaco, Vitest, Playwright)
 - `scripts/`: git build, packaging and E2E scripts
 
-## Clean-room note
-
-GitRais is an original implementation. It reproduces common Git client
-behaviour (git command sequences, their effect on repositories, credential and
-hook flows) but contains no code, assets, icons, texts, names or branding
-from any other Git client, and talks to no third-party service.
 
 ## License
 
