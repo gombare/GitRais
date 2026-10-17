@@ -6,3 +6,6 @@ frontend/dist/
 frontend/test-results/
 build/bigrepo/
 frontend/playwright-report/
+.DS_Store
+.superpowers/
+CLAUDE.md
